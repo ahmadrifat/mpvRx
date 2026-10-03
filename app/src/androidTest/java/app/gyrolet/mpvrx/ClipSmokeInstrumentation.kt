@@ -48,7 +48,19 @@ class ClipSmokeInstrumentation : Instrumentation() {
         check(video.getString("nb_read_frames").toInt() == 20) { "Expected exactly frames 34 through 53" }
         val audio = (0 until streams.length()).map { streams.getJSONObject(it) }.first { it.getString("codec_type") == "audio" }
         check(kotlin.math.abs(audio.getString("start_time").toDouble() - video.getString("start_time").toDouble()) < 0.034)
-        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment")
+        val videoOnly = File(directory, "video.mp4")
+        val audioOnly = File(directory, "audio.m4a")
+        check(FfmpegRuntime.run(context, listOf("-y", "-i", source.absolutePath, "-map", "0:v:0", "-c", "copy", videoOnly.absolutePath)).first == 0)
+        check(FfmpegRuntime.run(context, listOf("-y", "-i", source.absolutePath, "-map", "0:a:0", "-c", "copy", audioOnly.absolutePath)).first == 0)
+        val merged = app.gyrolet.mpvrx.domain.download.YtdlpMediaMerger.merge(context, listOf(videoOnly, audioOnly), File(directory, "merged.mp4"))
+        val mergedProbe = FfmpegRuntime.run(context, listOf("-v", "error", "-count_frames", "-show_entries", "stream=codec_type,codec_name,nb_read_frames", "-of", "json", merged.absolutePath), probe = true)
+        check(mergedProbe.first == 0)
+        val mergedTracks = org.json.JSONObject(mergedProbe.second).getJSONArray("streams")
+        val mergedVideo = (0 until mergedTracks.length()).map { mergedTracks.getJSONObject(it) }.first { it.getString("codec_type") == "video" }
+        check(mergedVideo.getString("codec_name") == "h264" && mergedVideo.getString("nb_read_frames") == "120")
+        check(mergedTracks.length() == 2)
+        testConcurrentDirectDownloads(context, directory)
+        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads")
         directory.deleteRecursively()
       }
       finish(android.app.Activity.RESULT_OK, result)
@@ -57,4 +69,40 @@ class ClipSmokeInstrumentation : Instrumentation() {
       finish(android.app.Activity.RESULT_CANCELED, result)
     }
   }
+  private suspend fun testConcurrentDirectDownloads(context: android.content.Context, directory: File) = kotlinx.coroutines.coroutineScope {
+    val database = androidx.room.Room.inMemoryDatabaseBuilder(context, app.gyrolet.mpvrx.database.MpvRxDatabase::class.java).build()
+    val dao = database.downloadItemDao()
+    val locations = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.DownloadLocations>()
+    val manager = app.gyrolet.mpvrx.domain.download.AppDownloadManager(context, dao, locations)
+    kotlinx.coroutines.delay(150)
+    val server = java.net.ServerSocket(0)
+    val arrived = java.util.concurrent.CountDownLatch(2)
+    val pool = java.util.concurrent.Executors.newCachedThreadPool()
+    val payload = ByteArray(128 * 1024) { (it % 251).toByte() }
+    val accepting = pool.submit {
+      repeat(2) {
+        val client = server.accept()
+        pool.submit {
+          client.use {
+            val reader = it.getInputStream().bufferedReader()
+            while (!reader.readLine().isNullOrBlank()) { }
+            arrived.countDown()
+            check(arrived.await(5, java.util.concurrent.TimeUnit.SECONDS)) { "Second download waited for the first" }
+            it.getOutputStream().apply {
+              write("HTTP/1.1 200 OK\r\nContent-Length: ${payload.size}\r\nConnection: close\r\n\r\n".toByteArray())
+              write(payload); flush()
+            }
+          }
+        }
+      }
+    }
+    val ids = (1..2).map { n -> dao.insert(app.gyrolet.mpvrx.database.entities.DownloadItemEntity(url = "http://127.0.0.1:${server.localPort}/$n.mp4", dirPath = directory.absolutePath, fileName = "concurrent-$n.mp4", status = "QUEUED")) }
+    try {
+      kotlinx.coroutines.withTimeout(15_000) { manager.drainQueue { } }
+      check(arrived.count == 0L)
+      ids.forEach { id -> val row = dao.findById(id)!!; check(row.status == "SUCCESS"); check(File(row.dirPath, row.fileName).readBytes().contentEquals(payload)) }
+      accepting.get(1, java.util.concurrent.TimeUnit.SECONDS)
+    } finally { server.close(); pool.shutdownNow(); database.close() }
+  }
+
 }

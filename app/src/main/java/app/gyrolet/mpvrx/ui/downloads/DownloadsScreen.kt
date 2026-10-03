@@ -139,6 +139,10 @@ object DownloadsScreen : Screen {
 
     app.gyrolet.mpvrx.ui.player.clip.ClipJobs.initialize(context)
     val clips by app.gyrolet.mpvrx.ui.player.clip.ClipJobs.jobs.collectAsState()
+    val activeTorrents = torrents.filterNot { it.complete }
+    val completedTorrents = torrents.filter { it.complete }
+    val activeClips = clips.filter { it.status != "Completed" }
+    val completedClips = clips.filter { it.status == "Completed" }
     val activeDownloads = downloads.filter { !it.isCompleted }
     val completedDownloads = downloads.filter { it.isCompleted }
     val activeYtdlp = ytdlpJobs.filter { it.state != YtdlpDownloadEngine.JobState.SUCCESS }
@@ -177,42 +181,6 @@ object DownloadsScreen : Screen {
           )
         }
 
-        if (clips.isNotEmpty()) {
-          item(key = "clip_header") { SectionHeader("Video clips") }
-          items(clips, key = { "clip_${it.id}" }) { clip ->
-            if (clip.status == "Completed") CompletedRow(
-              title = clip.title, subtitle = "Clipped · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = null,
-              mediaPath = clip.output, playable = clip.output != null,
-              onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title) } },
-              onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) },
-            ) else DownloadMediaRow(title = clip.title, subtitle = clip.error ?: clip.status, posterUrl = null, isError = clip.status == "Failed", progress = clip.progress, indeterminate = clip.active && clip.progress == null) {
-              if (clip.active) IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipExportManager.cancel() }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Cancel") }
-              else {
-                IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.retry(context, clip) }) { Icon(Icons.RoundedFilled.Refresh, contentDescription = "Retry") }
-                IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) }) { Icon(Icons.RoundedFilled.Delete, contentDescription = "Delete") }
-              }
-            }
-          }
-        }
-        if (torrents.isNotEmpty()) {
-          item(key = "torrent_header") { SectionHeader("Torrent videos") }
-          items(torrents, key = { "torrent_${it.id}" }) { torrent ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-              Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(torrent.title, fontWeight = FontWeight.Bold)
-                Text(if (torrent.complete) "Downloaded" else "${torrent.status} · ${(torrent.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
-                if (!torrent.complete) LinearProgressIndicator(progress = { torrent.progress }, modifier = Modifier.fillMaxWidth())
-                Row {
-                  TextButton(enabled = torrent.complete, onClick = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }) { Text("Play offline") }
-                  if (!torrent.complete && torrent.status == "Downloading") TextButton(onClick = { offline.pause(torrent.id) }) { Text("Pause") }
-                  if (!torrent.complete && torrent.status != "Downloading") TextButton(onClick = { offline.resume(context, torrent) }) { Text("Resume") }
-                  TextButton(onClick = { pendingTorrentDelete = torrent }) { Text("Delete") }
-                }
-              }
-            }
-          }
-        }
-
         if (downloads.isEmpty() && ytdlpJobs.isEmpty() && torrents.isEmpty() && clips.isEmpty()) {
           item(key = "empty") {
             EmptyState(
@@ -224,8 +192,24 @@ object DownloadsScreen : Screen {
           }
         }
 
-        if (activeDownloads.isNotEmpty() || activeYtdlp.isNotEmpty()) {
+        if (activeDownloads.isNotEmpty() || activeYtdlp.isNotEmpty() || activeTorrents.isNotEmpty() || activeClips.isNotEmpty()) {
           item(key = "active_header") { SectionHeader(stringResource(R.string.downloads_active_section)) }
+          items(activeTorrents, key = { "torrent_${it.id}" }) { torrent ->
+            DownloadMediaRow(title = torrent.title, subtitle = "${torrent.status} · ${(torrent.progress * 100).toInt()}%", posterUrl = null, progress = torrent.progress, indeterminate = false) {
+              if (torrent.status == "Downloading") IconButton(onClick = { offline.pause(torrent.id) }) { Icon(Icons.RoundedFilled.Pause, contentDescription = "Pause") }
+              else IconButton(onClick = { offline.resume(context, torrent) }) { Icon(Icons.RoundedFilled.PlayArrow, contentDescription = "Resume") }
+              IconButton(onClick = { pendingTorrentDelete = torrent }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Cancel") }
+            }
+          }
+          items(activeClips, key = { "clip_${it.id}" }) { clip ->
+            DownloadMediaRow(title = clip.title, subtitle = clip.error ?: clip.status, posterUrl = null, isError = clip.status == "Failed", progress = clip.progress, indeterminate = clip.active && clip.progress == null) {
+              if (clip.active) IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipExportManager.cancel() }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Cancel") }
+              else {
+                IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.retry(context, clip) }) { Icon(Icons.RoundedFilled.Refresh, contentDescription = "Retry") }
+                IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Remove") }
+              }
+            }
+          }
           items(activeYtdlp, key = { "ytdlp_${it.id}" }) { job ->
             YtdlpJobRow(
               job = job,
@@ -248,8 +232,16 @@ object DownloadsScreen : Screen {
           }
         }
 
-        if (completedDownloads.isNotEmpty() || completedYtdlp.isNotEmpty()) {
+        if (completedDownloads.isNotEmpty() || completedYtdlp.isNotEmpty() || completedTorrents.isNotEmpty() || completedClips.isNotEmpty()) {
           item(key = "completed_header") { SectionHeader(stringResource(R.string.downloads_completed_section)) }
+          items(completedTorrents, key = { "torrent_done_${it.id}" }) { torrent ->
+            CompletedRow(title = torrent.title, subtitle = File(torrent.path).name, posterUrl = null, mediaPath = torrent.path, playable = torrent.complete,
+              onPlay = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }, onDelete = { pendingTorrentDelete = torrent })
+          }
+          items(completedClips, key = { "clip_done_${it.id}" }) { clip ->
+            CompletedRow(title = clip.title, subtitle = "Clipped · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = null, mediaPath = clip.output, playable = clip.output != null,
+              onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title) } }, onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) })
+          }
           items(completedYtdlp, key = { "ytdlp_done_${it.id}" }) { job ->
             CompletedRow(
               title = job.title,
@@ -547,7 +539,7 @@ private fun YtdlpJobRow(
     isError = job.state == YtdlpDownloadEngine.JobState.FAILED,
     progress = (job.progressPercent / 100f).takeIf { job.state == YtdlpDownloadEngine.JobState.RUNNING },
     indeterminate = job.state == YtdlpDownloadEngine.JobState.QUEUED ||
-      job.state == YtdlpDownloadEngine.JobState.RUNNING && job.progressPercent <= 0f,
+      job.state == YtdlpDownloadEngine.JobState.RUNNING && (job.progressPercent <= 0f || job.detail.startsWith("Finalizing")),
   ) {
     if (job.isActive) IconButton(onClick = onPause) { Icon(Icons.RoundedFilled.Pause, contentDescription = "Pause") }
     if (job.state == YtdlpDownloadEngine.JobState.PAUSED) IconButton(onClick = onResume) { Icon(Icons.RoundedFilled.PlayArrow, contentDescription = "Resume") }
@@ -606,7 +598,7 @@ private fun downloadStatusLine(
   val entity = download.entity
   return when (download.status) {
     AppDownloadStatus.PAUSED -> "Paused"
-    AppDownloadStatus.QUEUED -> stringResource(R.string.downloads_queued)
+    AppDownloadStatus.QUEUED -> stringResource(R.string.downloads_preparing)
     AppDownloadStatus.FAILED ->
       stringResource(R.string.downloads_failed) +
         entity.failureReason?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
@@ -628,9 +620,9 @@ private fun downloadStatusLine(
 private fun ytdlpStatusLine(job: YtdlpDownloadEngine.Job): String =
   when (job.state) {
     YtdlpDownloadEngine.JobState.PAUSED -> "Paused"
-    YtdlpDownloadEngine.JobState.QUEUED -> stringResource(R.string.downloads_queued)
+    YtdlpDownloadEngine.JobState.QUEUED -> stringResource(R.string.downloads_preparing)
     YtdlpDownloadEngine.JobState.RUNNING ->
-      "${"%.1f".format(Locale.US, job.progressPercent)}% ${job.detail}".trim()
+      if (job.detail.startsWith("Finalizing")) job.detail else "${"%.1f".format(Locale.US, job.progressPercent)}% ${job.detail}".trim()
     YtdlpDownloadEngine.JobState.FAILED ->
       stringResource(R.string.downloads_failed) + job.error?.let { ": $it" }.orEmpty()
     YtdlpDownloadEngine.JobState.CANCELLED -> stringResource(R.string.downloads_cancelled)

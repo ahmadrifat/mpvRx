@@ -114,11 +114,14 @@ class AppDownloadManager(
         check(directory.isDirectory && directory.canWrite()) {
           context.getString(R.string.downloads_location_invalid)
         }
+        val extension = fileName.substringAfterLast('.', "")
+        val stem = if (extension.isBlank()) fileName else fileName.substringBeforeLast('.')
+        val uniqueName = stem + "-" + java.util.UUID.randomUUID().toString().take(8) + if (extension.isBlank()) "" else "." + extension
         dao.insert(
           DownloadItemEntity(
             url = url,
             dirPath = directory.absolutePath,
-            fileName = fileName,
+            fileName = uniqueName,
             // Auth headers ride along for the worker, encoded as simple lines.
             stagingPath = encodeHeaders(headers),
             status = AppDownloadStatus.QUEUED.name,
@@ -149,14 +152,15 @@ class AppDownloadManager(
     }
   }
 
-  /** Runs queued rows sequentially until the queue drains. Called from the service. */
-  suspend fun drainQueue(onUpdate: (ActiveSnapshot) -> Unit) {
+  /** Start all pending transfers without waiting for another video to finish. */
+  suspend fun drainQueue(onUpdate: (ActiveSnapshot) -> Unit) = kotlinx.coroutines.coroutineScope {
+    val running = mutableMapOf<Long, kotlinx.coroutines.Job>()
     while (true) {
-      val next =
-        dao.getAll()
-          .filter { it.status == AppDownloadStatus.QUEUED.name }
-          .minByOrNull { it.timeQueued } ?: break
-      runDownload(next, onUpdate)
+      running.entries.removeAll { it.value.isCompleted }
+      val pending = dao.getAll().filter { it.status == AppDownloadStatus.QUEUED.name && it.id !in running }
+      pending.forEach { row -> running[row.id] = launch { runDownload(row, onUpdate) } }
+      if (running.isEmpty() && pending.isEmpty()) break
+      kotlinx.coroutines.delay(100)
     }
     _activeSnapshot.value = null
   }

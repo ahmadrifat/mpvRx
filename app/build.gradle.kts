@@ -122,7 +122,7 @@ android {
     create("custom") {
       initWith(getByName("release"))
       applicationIdSuffix = ".custom"
-      versionNameSuffix = "-custom.2"
+      versionNameSuffix = "-custom.3"
       isMinifyEnabled = false
       isShrinkResources = false
       signingConfig = if (localProperties.getProperty("custom.storeFile") != null) {
@@ -233,7 +233,7 @@ androidComponents {
       }
 
       val channelVersionCode =
-        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 2)
+        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 3)
         else if (variant.buildType == "preview") previewVersionCode else (output.versionCode.orNull ?: stableVersionCode)
       output.versionCode.set(channelVersionCode * 10 + (abiCodes[abi] ?: 0))
     }

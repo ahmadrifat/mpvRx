@@ -12,3 +12,5 @@ The executable FFmpeg/FFprobe and library archives for arm64-v8a, armeabi-v7a, x
 The ffmpeg archive is supplemented with missing top-level non-Python shared libraries from the same-version Python artifact (including Expat/OpenSSL). Existing FFmpeg entries are preserved. Unix library symlinks are materialized as copies during runtime extraction. No executable source is modified.
 
 FFmpeg was built with GPL codecs including x264; applicable upstream GPL/LGPL and individual dependency licenses remain in effect. The application itself is AGPL-3.0-or-later. Preserve upstream notices and make the relevant corresponding sources/build scripts available when distributing native binaries. This file is a provenance index, not a replacement for dependency licenses.
+
+Release 3 trims the archive to the recursive shared-library dependencies of FFmpeg and FFprobe, excluding Android-provided system libraries. Recreate the archives using tools/prepare_clipping_runtime.py, then tools/prune_clipping_runtime.py --readelf <NDK llvm-readelf executable>. The phone APK bundles ARM32 and ARM64; source retains all four architectures.

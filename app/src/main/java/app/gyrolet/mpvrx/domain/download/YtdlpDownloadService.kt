@@ -90,7 +90,7 @@ class YtdlpDownloadService : Service() {
       when {
         running && job != null -> {
           val queueSuffix = if (queued > 0) " (+$queued)" else ""
-          "$progress% ${job.detail}$queueSuffix".trim()
+          if (job.detail.startsWith("Finalizing")) job.detail else "$progress% ${job.detail}$queueSuffix".trim()
         }
         else -> getString(R.string.downloads_preparing)
       }
@@ -111,7 +111,7 @@ class YtdlpDownloadService : Service() {
       .setContentText(text)
       .setOnlyAlertOnce(true)
       .setOngoing(true)
-      .setProgress(100, progress, !running || progress <= 0)
+      .setProgress(100, progress, !running || progress <= 0 || job?.detail?.startsWith("Finalizing") == true)
       .addAction(0, getString(android.R.string.cancel), cancelIntent)
       .build()
   }

@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Downloads HLS / extractor-backed links (YouTube, m3u8, ...) with the bundled yt-dlp
  * runtime, which handles playlist resolution, segment downloading and AES-128 decryption.
- * Jobs run one at a time inside [YtdlpDownloadService] so they survive backgrounding.
+ * Jobs run concurrently inside [YtdlpDownloadService] so they survive backgrounding.
  */
 class YtdlpDownloadEngine(
   private val context: Context,
@@ -63,6 +63,7 @@ class YtdlpDownloadEngine(
     val outputFile: String? = null,
     val artifactFiles: Set<String> = emptySet(),
     val headers: Map<String, String> = emptyMap(),
+    val fileBaseName: String? = null,
   ) {
     val isActive: Boolean get() = state == JobState.QUEUED || state == JobState.RUNNING
   }
@@ -90,15 +91,13 @@ class YtdlpDownloadEngine(
     }
   }
 
-  @Volatile
-  private var activeProcess: Process? = null
-
-  @Volatile
-  private var activeJobId: Int = -1
-
-  @Volatile
-  private var cancelRequested = false
-  @Volatile private var pauseRequested = false
+  private class Transfer {
+    @Volatile var process: Process? = null
+    @Volatile var cancelRequested = false
+    @Volatile var pauseRequested = false
+    var runner: kotlinx.coroutines.Job? = null
+  }
+  private val transfers = java.util.concurrent.ConcurrentHashMap<Int, Transfer>()
 
   fun enqueue(
     url: String,
@@ -123,6 +122,7 @@ class YtdlpDownloadEngine(
           mergeSeparateStreams = mergeSeparateStreams,
           posterUrl = posterUrl,
           headers = headers,
+          fileBaseName = DownloadLocations.sanitizeName(title) + "-" + id,
         )
     }
     YtdlpDownloadService.start(context)
@@ -130,25 +130,17 @@ class YtdlpDownloadEngine(
   }
 
   fun pause(id: Int) {
-    if (activeJobId == id) { pauseRequested = true; cancelRequested = true; activeProcess?.destroyForcibly() }
-    else updateJob(id) { if (it.state == JobState.QUEUED) it.copy(state = JobState.PAUSED) else it }
+    transfers[id]?.let { it.pauseRequested = true; it.cancelRequested = true; it.process?.destroyForcibly(); it.runner?.cancel() }
+      ?: updateJob(id) { if (it.state == JobState.QUEUED) it.copy(state = JobState.PAUSED) else it }
   }
   fun resume(id: Int) {
-    if (activeJobId == id) return
+    if (transfers.containsKey(id)) return
     updateJob(id) { if (it.state == JobState.PAUSED) it.copy(state = JobState.QUEUED, error = null) else it }
     YtdlpDownloadService.start(context)
   }
   fun cancel(id: Int) {
-    _jobs.update { current ->
-      current.map { job ->
-        if (job.id == id && job.state in setOf(JobState.QUEUED, JobState.PAUSED)) job.copy(state = JobState.CANCELLED) else job
-      }
-    }
-    if (activeJobId == id) {
-      pauseRequested = false
-      cancelRequested = true
-      activeProcess?.destroyForcibly()
-    }
+    transfers[id]?.let { it.pauseRequested = false; it.cancelRequested = true; it.process?.destroyForcibly(); it.runner?.cancel() }
+      ?: updateJob(id) { if (it.state in setOf(JobState.QUEUED, JobState.PAUSED)) it.copy(state = JobState.CANCELLED) else it }
   }
 
   fun retry(id: Int) {
@@ -177,24 +169,34 @@ class YtdlpDownloadEngine(
 
   fun hasQueuedWork(): Boolean = _jobs.value.any { it.state == JobState.QUEUED }
 
-  /** Runs queued jobs sequentially until the queue drains. Called from the service. */
-  suspend fun drainQueue(onJobUpdate: (Job) -> Unit) {
+  /** Start every pending request concurrently, including requests arriving during transfers. */
+  suspend fun drainQueue(onJobUpdate: (Job) -> Unit) = kotlinx.coroutines.supervisorScope {
     while (true) {
-      val job = _jobs.value.firstOrNull { it.state == JobState.QUEUED } ?: return
-      updateJob(job.id) { it.copy(state = JobState.RUNNING) }
-      currentJob(job.id)?.let(onJobUpdate)
-      runJob(job.id, onJobUpdate)
+      jobs.value.filter { it.state == JobState.QUEUED }.forEach { job ->
+        val control = Transfer()
+        if (transfers.putIfAbsent(job.id, control) == null) {
+          updateJob(job.id) { it.copy(state = JobState.RUNNING) }
+          control.runner = launch {
+            try { runJob(job.id, control, onJobUpdate) }
+            catch (e: CancellationException) {
+              updateJob(job.id) { it.copy(state = if (control.pauseRequested) JobState.PAUSED else if (control.cancelRequested) JobState.CANCELLED else JobState.FAILED, detail = "", error = if (control.cancelRequested) null else "Download interrupted. Tap Retry to continue.") }
+            } catch (e: Exception) {
+              updateJob(job.id) { it.copy(state = JobState.FAILED, detail = "", error = e.message ?: "Download failed") }
+            } finally { control.process?.destroyForcibly(); transfers.remove(job.id, control) }
+          }
+        }
+      }
+      if (transfers.isEmpty() && !hasQueuedWork()) break
+      kotlinx.coroutines.delay(100)
     }
   }
 
   private suspend fun runJob(
     id: Int,
+    control: Transfer,
     onJobUpdate: (Job) -> Unit,
   ) {
     val queuedJob = currentJob(id) ?: return
-    cancelRequested = false
-    pauseRequested = false
-    activeJobId = id
 
     try {
       if (queuedJob.posterUrl.isNullOrBlank() && HttpUtils.isYouTubeUrl(Uri.parse(queuedJob.url))) {
@@ -206,13 +208,13 @@ class YtdlpDownloadEngine(
         }
       }
     } catch (error: CancellationException) {
-      activeJobId = -1
+
       throw error
     }
     val job = currentJob(id)
-    if (cancelRequested || job == null) {
-      activeJobId = -1
-      updateJob(id) { it.copy(state = if (pauseRequested) JobState.PAUSED else JobState.CANCELLED, detail = "") }
+    if (control.cancelRequested || job == null) {
+
+      updateJob(id) { it.copy(state = if (control.pauseRequested) JobState.PAUSED else JobState.CANCELLED, detail = "") }
       currentJob(id)?.let(onJobUpdate)
       return
     }
@@ -226,20 +228,20 @@ class YtdlpDownloadEngine(
         }
       } catch (error: Exception) {
         if (error is CancellationException) {
-          activeJobId = -1
+
           throw error
         }
         runtimeOutput.append(error.message ?: error.javaClass.simpleName)
         false
       }
-    if (cancelRequested || currentJob(id) == null) {
-      activeJobId = -1
-      updateJob(id) { it.copy(state = if (pauseRequested) JobState.PAUSED else JobState.CANCELLED, detail = "") }
+    if (control.cancelRequested || currentJob(id) == null) {
+
+      updateJob(id) { it.copy(state = if (control.pauseRequested) JobState.PAUSED else JobState.CANCELLED, detail = "") }
       currentJob(id)?.let(onJobUpdate)
       return
     }
     if (!ready) {
-      activeJobId = -1
+
       updateJob(id) {
         it.copy(
           state = JobState.FAILED,
@@ -251,7 +253,7 @@ class YtdlpDownloadEngine(
     }
 
     val temporaryDirectory = workingDirectory(id).apply { mkdirs() }
-    val outputBaseName = DownloadLocations.sanitizeName(job.title)
+    val outputBaseName = (job.fileBaseName ?: DownloadLocations.sanitizeName(job.title))
     val outputTemplate =
       if (job.mergeSeparateStreams) {
         "$outputBaseName.f%(format_id)s.%(ext)s"
@@ -275,10 +277,10 @@ class YtdlpDownloadEngine(
     val result =
       withContext(Dispatchers.IO) {
         runCatching {
-          if (cancelRequested) return@runCatching -1
+          if (control.cancelRequested) return@runCatching -1
           val process = startProcess(command)
-          activeProcess = process
-          if (cancelRequested) process.destroyForcibly()
+          control.process = process
+          if (control.cancelRequested) process.destroyForcibly()
           BufferedReader(InputStreamReader(process.inputStream)).useLines { lines ->
             lines.forEach { line ->
               parseDestination(line)?.let { path ->
@@ -291,7 +293,7 @@ class YtdlpDownloadEngine(
               }
               val progress = parseProgressLine(line)
               if (progress != null) {
-                updateJob(id) { it.copy(progressPercent = progress.first, detail = progress.second) }
+                updateJob(id) { it.copy(progressPercent = progress.first, detail = if (progress.first >= 100f) "Finalizing download" else progress.second) }
                 currentJob(id)?.let(onJobUpdate)
               } else if (line.isNotBlank()) {
                 errorOutput.addLast(line.take(2_048))
@@ -304,16 +306,16 @@ class YtdlpDownloadEngine(
         }
       }
 
-    activeProcess = null
-    activeJobId = -1
+    control.process = null
+
 
     result
       .onSuccess { exitCode ->
         when {
-          cancelRequested ->
+          control.cancelRequested ->
             updateJob(id) {
               it.copy(
-                state = if (pauseRequested) JobState.PAUSED else JobState.CANCELLED,
+                state = if (control.pauseRequested) JobState.PAUSED else JobState.CANCELLED,
                 detail = "",
                 artifactFiles = it.artifactFiles + observedArtifacts,
               )
@@ -324,7 +326,7 @@ class YtdlpDownloadEngine(
             val resolvedResult =
               runCatching {
                 if (job.mergeSeparateStreams) {
-                  updateJob(id) { it.copy(progressPercent = 99f, detail = "") }
+                  updateJob(id) { it.copy(progressPercent = 99f, detail = "Finalizing audio and video") }
                   YtdlpMediaMerger.merge(
                     context = context,
                     candidates = discoverSeparateStreamFiles(job).toList(),
@@ -382,8 +384,8 @@ class YtdlpDownloadEngine(
         Log.e(TAG, "yt-dlp download failed", error)
         updateJob(id) {
           it.copy(
-            state = if (pauseRequested) JobState.PAUSED else if (cancelRequested) JobState.CANCELLED else JobState.FAILED,
-            error = if (cancelRequested) null else error.message ?: "Unknown error",
+            state = if (control.pauseRequested) JobState.PAUSED else if (control.cancelRequested) JobState.CANCELLED else JobState.FAILED,
+            error = if (control.cancelRequested) null else error.message ?: "Unknown error",
             artifactFiles = it.artifactFiles + observedArtifacts,
           )
         }
@@ -531,7 +533,7 @@ class YtdlpDownloadEngine(
     file: File,
   ): Boolean {
     if (!file.isFile || file.extension.lowercase() !in PLAYABLE_EXTENSIONS) return false
-    val prefix = "${DownloadLocations.sanitizeName(job.title)}."
+    val prefix = "${(job.fileBaseName ?: DownloadLocations.sanitizeName(job.title))}."
     if (!file.name.startsWith(prefix)) return false
     return !file.name.removePrefix(prefix).contains('.')
   }
@@ -571,7 +573,7 @@ class YtdlpDownloadEngine(
   }
 
   private fun discoverArtifactFiles(job: Job): Sequence<File> {
-    val fileNamePrefix = "${DownloadLocations.sanitizeName(job.title)}."
+    val fileNamePrefix = "${(job.fileBaseName ?: DownloadLocations.sanitizeName(job.title))}."
     return File(job.directory)
       .listFiles()
       ?.asSequence()
@@ -587,7 +589,7 @@ class YtdlpDownloadEngine(
   }
 
   private fun discoverSeparateStreamFiles(job: Job): Sequence<File> {
-    val fileNamePrefix = "${DownloadLocations.sanitizeName(job.title)}.f"
+    val fileNamePrefix = "${(job.fileBaseName ?: DownloadLocations.sanitizeName(job.title))}.f"
     return sequenceOf(File(job.directory), workingDirectory(job.id))
       .filter(File::isDirectory)
       .flatMap { directory -> directory.walkTopDown().maxDepth(2) }

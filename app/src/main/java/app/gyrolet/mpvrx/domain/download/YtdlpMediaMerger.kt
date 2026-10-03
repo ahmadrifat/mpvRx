@@ -46,73 +46,14 @@ internal object YtdlpMediaMerger {
     val inputs = withContext(Dispatchers.IO) { findInputs(candidates) }
     val stagingFile = File(outputFile.parentFile, "${outputFile.name}.merging")
 
-    return withContext(Dispatchers.Main.immediate) {
-      suspendCancellableCoroutine { continuation ->
-        stagingFile.delete()
-        val videoItem =
-          EditedMediaItem
-            .Builder(MediaItem.fromUri(Uri.fromFile(inputs.video)))
-            .setRemoveAudio(true)
-            .build()
-        val audioItem =
-          EditedMediaItem
-            .Builder(MediaItem.fromUri(Uri.fromFile(inputs.audio)))
-            .setRemoveVideo(true)
-            .build()
-        val composition =
-          Composition
-            .Builder(
-              EditedMediaItemSequence.withVideoFrom(listOf(videoItem)),
-              EditedMediaItemSequence.withAudioFrom(listOf(audioItem)),
-            ).build()
-
-        lateinit var transformer: Transformer
-        transformer =
-          Transformer
-            .Builder(context.applicationContext)
-            .setVideoMimeType(MimeTypes.VIDEO_H264)
-            .setAudioMimeType(MimeTypes.AUDIO_AAC)
-            .addListener(
-              object : Transformer.Listener {
-                override fun onCompleted(
-                  composition: Composition,
-                  exportResult: ExportResult,
-                ) {
-                  CoroutineScope(continuation.context).launch(Dispatchers.IO) {
-                    runCatching { publish(stagingFile, outputFile) }
-                      .onSuccess { published ->
-                        if (continuation.isActive) continuation.resume(published)
-                      }.onFailure { error ->
-                        stagingFile.delete()
-                        if (continuation.isActive) continuation.resumeWithException(error)
-                      }
-                  }
-                }
-
-                override fun onError(
-                  composition: Composition,
-                  exportResult: ExportResult,
-                  exportException: ExportException,
-                ) {
-                  stagingFile.delete()
-                  if (continuation.isActive) continuation.resumeWithException(exportException)
-                }
-              },
-            ).build()
-
-        continuation.invokeOnCancellation {
-          Handler(Looper.getMainLooper()).post {
-            transformer.cancel()
-            stagingFile.delete()
-          }
-        }
-        runCatching { transformer.start(composition, stagingFile.absolutePath) }
-          .onFailure { error ->
-            stagingFile.delete()
-            if (continuation.isActive) continuation.resumeWithException(error)
-          }
-      }
-    }
+    try {
+      val result = app.gyrolet.mpvrx.ui.player.clip.FfmpegRuntime.run(context, listOf(
+        "-hide_banner", "-nostdin", "-y", "-i", inputs.video.absolutePath, "-i", inputs.audio.absolutePath,
+        "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-f", "mp4", stagingFile.absolutePath,
+      ))
+      check(result.first == 0) { "Could not merge audio and video: " + result.second.lineSequence().filter { it.isNotBlank() }.toList().takeLast(2).joinToString(" ").take(240) }
+      return withContext(Dispatchers.IO) { publish(stagingFile, outputFile) }
+    } finally { stagingFile.delete() }
   }
 
   private fun findInputs(candidates: List<File>): MergeInputs {

@@ -1,14 +1,17 @@
-# mpvRx Custom 2.7.2-custom.2
+# mpvRx Custom 2.7.2-custom.3
 
 Based on upstream 594bfc67, with the previous custom source checkpoint preserved in Git.
 
 ## Installation
 
-Install the universal APK on Android 8 or newer. Package: app.gyrolet.mpvrx.custom. Version code: 20. It updates the earlier custom APK signed with the same private key and retains its data. It also coexists with the author's original app. An APK with the original package but a different signing certificate cannot update the author's installation.
+Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.custom. Version code: 30. It updates the earlier custom APK signed with the same private key and retains its data. It also coexists with the author's original app. An APK with the original package but a different signing certificate cannot update the author's installation.
 
 ## Changes
 
 - Configurable Download player button, defaulted before More; uses the existing download engines.
+- Downloads uses only Active and Completed sections for torrents, clips and other videos, with consistent row controls.
+- Every direct and yt-dlp download starts concurrently, with independent cancellation and pause controls and unique filenames.
+- Separate YouTube audio/video streams are merged by FFmpeg stream copy without re-encoding. The UI shows Finalizing while publishing the combined file.
 - Pause/resume for direct and yt-dlp downloads; partial files retained. Direct HTTP resume requires a stable server validator and byte-range support; otherwise it restarts safely.
 - Download notification opens Downloads.
 - Automatic clipping: optimized Media3 export where supported, hardware encoding where needed, FFmpeg fallback. Millisecond input is resolved to available video frames; a 30 fps video cannot have a new boundary at every millisecond. Clipping progress and completed clips appear in Downloads. Online extraction attempts the selected interval first and can fall back to downloading the source. Existing complete downloads are reused.
@@ -23,7 +26,7 @@ Preserve the package and private signing key for updates. Signing files are excl
 
 Build with the repository Gradle wrapper, a compatible JDK, Android SDK and configured NDK:
 
-    .\gradlew.bat :app:assembleStandardCustom :app:testStandardCustomUnitTest --no-daemon --max-workers=2
+    .\gradlew.bat :app:assembleStandardCustom :app:testStandardCustomUnitTest -PenableX86=false --no-daemon --max-workers=2
 
 Universal output: app/build/outputs/apk/standard/custom/app-standard-universal-custom.apk.
 
@@ -31,7 +34,7 @@ Keep feature changes in separate commits. Fetch and merge origin/master periodic
 
 ## Verification and limits
 
-See Build-verification-v2.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
+See Build-verification-v3.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
 
 Clipping cannot recover past live segments no longer offered by the server, bypass DRM, or promise support for every codec. Encoding is necessary for frame-accurate boundaries that cannot be safely copied. Clip encoding has cancel/retry, not pause/resume. Android force-stop and foreground-service time limits can interrupt work. Offline torrent storage is private and removed when app data is cleared or the app uninstalled.
 
