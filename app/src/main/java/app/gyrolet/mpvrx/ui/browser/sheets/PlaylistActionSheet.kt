@@ -73,6 +73,10 @@ fun PlaylistActionSheet(
   var showCreateDialog by remember { mutableStateOf(false) }
   var showM3UDialog by remember { mutableStateOf(false) }
   var showXtreamDialog by remember { mutableStateOf(false) }
+  var showStalkerDialog by remember { mutableStateOf(false) }
+  if (showStalkerDialog) {
+    app.gyrolet.mpvrx.ui.browser.dialogs.AddStalkerPlaylistDialog(onDismiss = { showStalkerDialog = false }, onImported = { showStalkerDialog = false; onDismiss() })
+  }
   val zipScope = rememberCoroutineScope()
   var zipImportJob by remember { mutableStateOf<Job?>(null) }
   var isImportingZip by remember { mutableStateOf(false) }
@@ -165,6 +169,9 @@ fun PlaylistActionSheet(
       }
 
       // Action cards
+      Card(onClick = { showStalkerDialog = true }, modifier = Modifier.fillMaxWidth()) {
+        Text("Add MAG / Stalker portal", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge)
+      }
       Card(
         onClick = {
           showCreateDialog = true

@@ -1999,6 +1999,11 @@ object PlaybackSession : MPVLib.EventObserver {
   }
 
   private fun resolvePlayableUri(item: PlaybackItem): ResolvedPlayable {
+    if (app.gyrolet.mpvrx.data.network.StalkerPortal.isReference(item.playableUri)) {
+      val proxy = XtreamStreamingProxy.getInstance()
+      val streamId = "stalker-${streamSequence.incrementAndGet()}"
+      return ResolvedPlayable(proxy.registerStalkerStream(streamId, item.playableUri), NetworkStreamRegistration(xtreamProxy = proxy, streamId = streamId))
+    }
     if (app.gyrolet.mpvrx.domain.archive.ZipArchiveMedia.isPlaybackUri(item.originalUri)) {
       val context = applicationContext ?: error("Application context is unavailable for ZIP playback")
       val archive = app.gyrolet.mpvrx.domain.archive.ZipArchiveMedia.openPlayback(context, item.originalUri)

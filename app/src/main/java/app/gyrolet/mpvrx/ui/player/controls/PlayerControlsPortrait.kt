@@ -270,6 +270,7 @@ fun BottomPlayerControlsPortrait(
           modifier = Modifier.size(44.dp),
         )
       }
+      DownloadCurrentButton()
     }
   }
 }

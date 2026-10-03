@@ -64,6 +64,9 @@ fun AddXtreamPlaylistDialog(
 
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
+  val client = org.koin.compose.koinInject<app.gyrolet.mpvrx.data.network.XtreamClient>()
+  var accountDetails by remember { mutableStateOf<String?>(null) }
+  var preferHls by remember { mutableStateOf(true) }
   var serverUrl by remember { mutableStateOf("") }
   var username by remember { mutableStateOf("") }
   var password by remember { mutableStateOf("") }
@@ -89,6 +92,7 @@ fun AddXtreamPlaylistDialog(
     if (canSubmit) {
       isLoading = true
       coroutineScope.launch {
+        context.getSharedPreferences("custom_iptv", android.content.Context.MODE_PRIVATE).edit().putString(app.gyrolet.mpvrx.data.network.XtreamClient.outputPreferenceKey(serverUrl, username), if (preferHls) "m3u8" else "ts").apply()
         onCreateXtreamPlaylist(serverUrl.trim(), username, password)
           .onSuccess {
             Toast
@@ -177,6 +181,10 @@ fun AddXtreamPlaylistDialog(
           modifier = Modifier.fillMaxWidth(),
         )
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text("Prefer HLS streams", modifier = Modifier.weight(1f))
+          androidx.compose.material3.Switch(checked = preferHls, onCheckedChange = { preferHls = it }, enabled = !isLoading)
+        }
         if (showServerUrlError) {
           Text(
             text = stringResource(R.string.playlist_xtream_url_error),
@@ -203,6 +211,15 @@ fun AddXtreamPlaylistDialog(
           horizontalArrangement = Arrangement.End,
           verticalAlignment = Alignment.CenterVertically,
         ) {
+          TextButton(enabled = canSubmit, onClick = {
+            isLoading = true
+            coroutineScope.launch {
+              client.checkAccount(serverUrl.trim(), username, password)
+                .onSuccess { accountDetails = it; errorMessage = null }
+                .onFailure { errorMessage = it.message }
+              isLoading = false
+            }
+          }) { Text("Check account") }
           TextButton(onClick = onDismiss, enabled = !isLoading) {
             Text(stringResource(R.string.generic_cancel))
           }
@@ -213,5 +230,8 @@ fun AddXtreamPlaylistDialog(
         }
       }
     }
+  }
+  accountDetails?.let { details ->
+    androidx.compose.material3.AlertDialog(onDismissRequest = { accountDetails = null }, title = { Text("Xtream account") }, text = { Text(details) }, confirmButton = { TextButton(onClick = { accountDetails = null }) { Text("OK") } })
   }
 }

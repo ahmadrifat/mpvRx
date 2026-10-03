@@ -69,9 +69,10 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
 
   private class StreamInfo(
     val registrationId: String,
-    val reference: XtreamPlaybackUri.Reference,
-    val headers: Map<String, String>,
+    val reference: XtreamPlaybackUri.Reference?,
+    var headers: Map<String, String>,
     val mimeType: String,
+    val stalkerReference: String? = null,
   ) {
     @Volatile
     var sourceUrl: String? = null
@@ -96,6 +97,7 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
   }
 
   private val repository by inject<PlaylistRepository>()
+  private val appContext by inject<android.content.Context>()
   private val random = SecureRandom()
   private val proxyJob = SupervisorJob()
   private val proxyScope = CoroutineScope(Dispatchers.IO + proxyJob)
@@ -130,6 +132,14 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
   }
 
   @Synchronized
+  fun registerStalkerStream(streamId: String, reference: String): String {
+    val token = generateToken()
+    streamsByToken[token] = StreamInfo(streamId, null, emptyMap(), "application/octet-stream", reference)
+    tokenByRegistration.put(streamId, token)?.let { old -> streamsByToken.remove(old)?.let(::release) }
+    return URI("http", null, "127.0.0.1", listeningPort, "/xtream/$token/stream", null, null).toASCIIString()
+  }
+
+  @Synchronized
   fun unregisterStream(streamId: String) {
     val token = tokenByRegistration.remove(streamId) ?: return
     streamsByToken.remove(token)?.let(::release)
@@ -146,7 +156,7 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
     val info = token.takeIf(String::isNotBlank)?.let(streamsByToken::get) ?: return notFound(headOnly)
     val sourceUrl = resolveSource(info) ?: return upstreamFailure(headOnly)
 
-    if (info.reference.extension.equals("m3u8", ignoreCase = true)) {
+    if (info.reference?.extension.equals("m3u8", ignoreCase = true) || sourceUrl.substringBefore('?').endsWith(".m3u8", true)) {
       return redirectToHls(info, sourceUrl, headOnly)
     }
 
@@ -155,7 +165,11 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
 
   private fun resolveSource(info: StreamInfo): String? {
     info.sourceUrl?.let { return it }
-    val result = awaitProxyIo { repository.resolveXtreamStream(info.reference) }
+    val result = awaitProxyIo {
+      if (info.stalkerReference != null) {
+        app.gyrolet.mpvrx.data.network.StalkerPortal.resolve(appContext, info.stalkerReference).map { stream -> info.headers = stream.headers; stream.url }
+      } else repository.resolveXtreamStream(requireNotNull(info.reference))
+    }
     val sourceUrl = result.getOrNull() ?: return null
     synchronized(info) {
       info.sourceUrl?.let { return it }

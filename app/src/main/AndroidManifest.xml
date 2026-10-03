@@ -96,6 +96,7 @@
                 android:resource="@xml/media_player_widget_info" />
         </receiver>
 
+        <service android:name=".domain.torrent.TorrentDownloadService" android:exported="false" android:foregroundServiceType="dataSync" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

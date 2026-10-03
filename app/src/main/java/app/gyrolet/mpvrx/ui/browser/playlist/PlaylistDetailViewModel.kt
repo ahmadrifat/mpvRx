@@ -112,6 +112,18 @@ class PlaylistDetailViewModel(
   }
 
   init {
+    viewModelScope.launch(Dispatchers.IO) {
+      val saved = playlistRepository.getPlaylistById(playlistId)
+      val prefs = application.getSharedPreferences("custom_iptv", android.content.Context.MODE_PRIVATE)
+      if (saved?.isM3uPlaylist == true && prefs.getBoolean("refresh_on_open_$playlistId", true)) {
+        val last = prefs.getLong("last_refresh_$playlistId", 0L)
+        if (System.currentTimeMillis() - last > 15 * 60 * 1000L) {
+          playlistRepository.refreshM3UPlaylist(playlistId).onSuccess {
+            prefs.edit().putLong("last_refresh_$playlistId", System.currentTimeMillis()).apply()
+          }
+        }
+      }
+    }
     // Observe playlist info
     viewModelScope.launch(Dispatchers.IO) {
       playlistRepository.observePlaylistById(playlistId).collectLatest { playlist ->

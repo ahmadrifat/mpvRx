@@ -125,6 +125,7 @@ class TorrentStreamingEngine(
     val proxy: TorrentProxyServer,
     val cacheDir: File,
     val statsJob: Job,
+    val retainedId: String,
   )
 
   private data class PreparedTorrent(
@@ -273,6 +274,7 @@ class TorrentStreamingEngine(
               playableFiles = preparedSession.playableFiles,
             )
           val statsJob = startStatsMonitoring(startGeneration, preparedSession.handle, result)
+          val retainedId = OfflineTorrents.attach(appContext, result, preparedSession.cacheDir, preparedSession.session, preparedSession.handle)
           active =
             ActiveStream(
               preparedSession.session,
@@ -280,6 +282,7 @@ class TorrentStreamingEngine(
               startedProxy,
               preparedSession.cacheDir,
               statsJob,
+              retainedId,
             )
           sessionToClean = null
           proxy = null
@@ -319,7 +322,7 @@ class TorrentStreamingEngine(
     val normalized = normalizeTorrentSource(source)
       ?: if (isMetadataUri(source)) source else throw streamError("Unsupported torrent source.")
 
-    val cacheDir = File(appContext.cacheDir, "torrent_streaming/${UUID.randomUUID()}")
+    val cacheDir = OfflineTorrents.directoryFor(appContext, source)
     if (!cacheDir.mkdirs() && !cacheDir.isDirectory) {
       throw streamError("Couldn't create the torrent streaming cache.")
     }
@@ -497,7 +500,8 @@ class TorrentStreamingEngine(
     val priorities = Array(info.files().numFiles()) { Priority.IGNORE }
 
     return monitorTorrentErrors(session) { failure ->
-      session.download(info, cacheDir, null, priorities, null, TorrentFlags.SEQUENTIAL_DOWNLOAD)
+      val resume = File(cacheDir, "resume.dat").takeIf { it.isFile }
+      session.download(info, cacheDir, resume, priorities, null, TorrentFlags.SEQUENTIAL_DOWNLOAD)
       val handle = waitForHandle(session, info.infoHash(), startGeneration, failure)
       endpoints.trackers.forEach { tracker -> handle.addTracker(AnnounceEntry(tracker)) }
       endpoints.webSeeds.forEach(handle::addUrlSeed)
@@ -774,7 +778,7 @@ class TorrentStreamingEngine(
     active = null
     stream.statsJob.cancel()
     stream.proxy.close()
-    cleanup(stream.session, stream.handle, stream.cacheDir)
+    OfflineTorrents.detach(stream.retainedId)
   }
 
   private fun cleanupPrepared() {
@@ -792,6 +796,10 @@ class TorrentStreamingEngine(
     handle: TorrentHandle?,
     cacheDir: File,
   ) {
+    if (OfflineTorrents.isRetained(cacheDir)) {
+      runCatching { session.stop() }
+      return
+    }
     if (handle?.isValid == true) {
       runCatching { session.remove(handle, SessionHandle.DELETE_FILES) }
     }
@@ -811,6 +819,7 @@ class TorrentStreamingEngine(
       cleanup(session, handle, cacheDir)
       return
     }
+    if (OfflineTorrents.isRetained(cacheDir)) return
     if (cacheDir.exists() && !cacheDir.deleteRecursively()) {
       Log.w(TAG, "Torrent cache cleanup did not remove every file")
     }

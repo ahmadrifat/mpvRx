@@ -690,6 +690,14 @@ data class PlaylistDetailScreen(
           },
         ) {
           Column(modifier = Modifier.fillMaxSize()) {
+            if (playlist?.isM3uPlaylist == true) {
+              val prefs = remember { context.getSharedPreferences("custom_iptv", android.content.Context.MODE_PRIVATE) }
+              var autoRefresh by remember { mutableStateOf(prefs.getBoolean("refresh_on_open_$playlistId", true)) }
+              Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                Text("Refresh on open (every 15 min)", modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(checked = autoRefresh, onCheckedChange = { autoRefresh = it; prefs.edit().putBoolean("refresh_on_open_$playlistId", it).apply() })
+              }
+            }
             if (!isReorderMode && (hasFavoriteStreams || (playlist?.isM3uPlaylist == true && categories.isNotEmpty()))) {
               M3UPlaylistFilterRow(
                 categories = if (playlist?.isM3uPlaylist == true) categories else emptyList(),

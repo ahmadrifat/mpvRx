@@ -51,6 +51,7 @@ data class ClipRequest(
   val startSeconds: Double,
   val endSeconds: Double,
   val crop: ClipCrop? = null,
+  val lossless: Boolean = false,
 )
 
 sealed interface ClipExportState {
@@ -119,7 +120,15 @@ object ClipExportManager {
         temporaryOutput = createTemporaryOutput(appContext)
 
         val error =
-          Media3ClipExporter.export(
+          if (request.lossless && request.crop == null) LosslessClipExporter.export(
+            context = appContext,
+            source = resolvedSource.uri,
+            output = temporaryOutput.absolutePath,
+            startSeconds = request.startSeconds,
+            endSeconds = request.endSeconds,
+            headers = request.item.headers,
+            onProgress = { progress -> _state.value = ClipExportState.Exporting(progress.toFloat()) },
+          ) else Media3ClipExporter.export(
             context = appContext,
             source = resolvedSource.uri,
             output = temporaryOutput.absolutePath,

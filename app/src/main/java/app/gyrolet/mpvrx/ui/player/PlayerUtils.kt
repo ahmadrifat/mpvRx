@@ -249,7 +249,7 @@ internal fun Uri.resolveUri(
         ?: if (allowFdFallback) null else toString()
     "data" -> "data://$schemeSpecificPart"
     "archive", "magnet", "torrent" -> toString()
-    NetworkPlaybackUri.SCHEME, XtreamPlaybackUri.SCHEME -> toString()
+    NetworkPlaybackUri.SCHEME, XtreamPlaybackUri.SCHEME, "mpvrx-stalker" -> toString()
     in Utils.PROTOCOLS -> toString()
     else -> {
       Log.e(TAG, "Unsupported URI scheme: $scheme")

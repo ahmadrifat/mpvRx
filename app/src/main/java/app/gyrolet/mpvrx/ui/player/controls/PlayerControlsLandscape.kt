@@ -323,6 +323,7 @@ fun BottomRightPlayerControlsLandscape(
           modifier = Modifier.size(45.dp),
         )
       }
+      DownloadCurrentButton()
     }
   }
 }

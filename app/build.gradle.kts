@@ -40,6 +40,7 @@ android {
   namespace = "app.gyrolet.mpvrx"
   compileSdk = 37
   ndkVersion = "27.3.13750724"
+  testBuildType = "custom"
 
   defaultConfig {
     applicationId = "app.gyrolet.mpvrx"
@@ -117,6 +118,25 @@ android {
   }
 
   buildTypes {
+    create("custom") {
+      initWith(getByName("release"))
+      applicationIdSuffix = ".custom"
+      versionNameSuffix = "-custom.1"
+      isMinifyEnabled = false
+      isShrinkResources = false
+      signingConfig = if (localProperties.getProperty("custom.storeFile") != null) {
+        signingConfigs.create("customRelease") {
+          storeFile = rootProject.file(localProperties.getProperty("custom.storeFile"))
+          storePassword = localProperties.getProperty("custom.storePassword")
+          keyAlias = localProperties.getProperty("custom.alias")
+          keyPassword = localProperties.getProperty("custom.storePassword")
+        }
+      } else signingConfigs.getByName("debug")
+      matchingFallbacks += listOf("release")
+      buildConfigField("boolean", "IS_PREVIEW_BUILD", "false")
+      buildConfigField("boolean", "ENABLE_UPDATE_FEATURE", "false")
+      resValue("string", "app_name", "mpvRx Custom")
+    }
     named("release") {
       buildConfigField("boolean", "IS_PREVIEW_BUILD", "false")
       isMinifyEnabled = true
@@ -212,7 +232,8 @@ androidComponents {
       }
 
       val channelVersionCode =
-        if (variant.buildType == "preview") previewVersionCode else (output.versionCode.orNull ?: stableVersionCode)
+        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 1)
+        else if (variant.buildType == "preview") previewVersionCode else (output.versionCode.orNull ?: stableVersionCode)
       output.versionCode.set(channelVersionCode * 10 + (abiCodes[abi] ?: 0))
     }
   }
@@ -238,6 +259,7 @@ room {
 }
 
 dependencies {
+  testImplementation("junit:junit:4.13.2")
   implementation(libs.androidx.activity.compose)
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.ui)

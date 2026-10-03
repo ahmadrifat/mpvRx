@@ -238,6 +238,7 @@ class PlaylistRepository(
     withContext(Dispatchers.IO) {
       remotePlaylistWriteMutex.withLock {
         playlistDao.deletePlaylist(playlist)
+        playlist.m3uSourceUrl?.let { app.gyrolet.mpvrx.data.network.StalkerPortal.remove(applicationContext, it) }
         localPlaylistSourceKey(playlist.m3uSourceUrl)?.let { key ->
           localPlaylistPreferences.edit().putStringSet("ignored_sources", ignoredLocalPlaylistSources() + key).apply()
         }
@@ -499,11 +500,24 @@ class PlaylistRepository(
   ) = playlistDao.setFavorite(itemId, isFavorite)
 
   // M3U Playlist operations
+  private fun xtreamOutput(serverUrl: String, username: String): String = applicationContext.getSharedPreferences("custom_iptv", Context.MODE_PRIVATE).getString(XtreamClient.outputPreferenceKey(serverUrl, username), "m3u8") ?: "m3u8"
+  suspend fun createStalkerPlaylist(name: String, portal: String, mac: String, userAgent: String): Result<Long> = try {
+    val (source, catalog) = app.gyrolet.mpvrx.data.network.StalkerPortal.create(applicationContext, name, portal, mac, userAgent)
+    Result.success(persistM3UPlaylist(catalog, name, source, null))
+  } catch (error: CancellationException) { throw error } catch (error: Exception) { Result.failure(error) }
+
   suspend fun createM3UPlaylist(
     url: String,
     userAgent: String? = null,
   ): Result<Long> =
     try {
+      val accountUrl = url.toHttpUrlOrNull()
+      val accountUser = accountUrl?.queryParameter("username")
+      val accountPassword = accountUrl?.queryParameter("password")
+      if (!accountUser.isNullOrBlank() && !accountPassword.isNullOrBlank() && accountUrl.encodedPath.endsWith("/get.php")) {
+        val server = accountUrl.newBuilder().query(null).encodedPath(accountUrl.encodedPath.removeSuffix("/get.php").ifEmpty { "/" }).build().toString().trimEnd('/')
+        return createXtreamPlaylist(server, accountUser, accountPassword)
+      }
       val remotePlaylist = loadRemotePlaylist(url, userAgent).getOrElse { error -> return Result.failure(error) }
       val playlistId =
         persistM3UPlaylist(
@@ -528,7 +542,7 @@ class PlaylistRepository(
       val accountUsername = username
       val catalog =
         xtreamClient
-          .loadCatalog(serverUrl, accountUsername, password)
+          .loadCatalog(serverUrl, accountUsername, password, xtreamOutput(serverUrl, accountUsername))
           .getOrElse { error -> return Result.failure(error) }
       val encryptedPassword = encryptXtreamPassword(password)
 
@@ -777,7 +791,7 @@ class PlaylistRepository(
         .getOrElse { error -> return Result.failure(error) }
     val catalog =
       xtreamClient
-        .loadCatalog(serverUrl, username, password)
+        .loadCatalog(serverUrl, username, password, xtreamOutput(serverUrl, username))
         .getOrElse { error -> return Result.failure(error) }
     val securedPlaylist =
       runCatching {
@@ -977,6 +991,11 @@ class PlaylistRepository(
     sourceUrl: String,
     userAgent: String?,
   ): Result<RemotePlaylist> {
+    if (sourceUrl.startsWith("mpvrx-stalker-source://")) {
+      return try {
+        Result.success(RemotePlaylist(app.gyrolet.mpvrx.data.network.StalkerPortal.refresh(applicationContext, sourceUrl), sourceUrl))
+      } catch (error: CancellationException) { throw error } catch (error: Exception) { Result.failure(error) }
+    }
     var webPlaylistError: Throwable? = null
     if (YtdlpManager.isPotentialPlaylistUrl(sourceUrl) && YtdlpManager.requiresYtdlp(sourceUrl)) {
       val webPlaylistResult =
@@ -1004,7 +1023,8 @@ class PlaylistRepository(
           ),
         )
       is M3UParseResult.Error ->
-        Result.failure(webPlaylistError ?: Exception(parseResult.message, parseResult.exception))
+        if (M3UParser.shouldPlayHlsDirectly(parseResult)) Result.success(RemotePlaylist(M3UParseResult.Success("HLS stream", listOf(M3UPlaylistItem(sourceUrl, "HLS stream", userAgent = userAgent))), sourceUrl))
+        else Result.failure(webPlaylistError ?: Exception(parseResult.message, parseResult.exception))
     }
   }
 }

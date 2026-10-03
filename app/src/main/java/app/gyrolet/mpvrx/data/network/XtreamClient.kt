@@ -12,12 +12,14 @@ package app.gyrolet.mpvrx.data.network
 import app.gyrolet.mpvrx.network.awaitResponse
 import app.gyrolet.mpvrx.utils.media.M3UParseResult
 import app.gyrolet.mpvrx.utils.media.M3UParser
+import app.gyrolet.mpvrx.utils.media.M3UPlaylistItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -39,23 +41,25 @@ class XtreamClient(
     rawServerUrl: String,
     username: String,
     password: String,
+    output: String = "m3u8",
   ): Result<XtreamCatalog> =
     try {
       val serverUrl = normalizeServerUrl(rawServerUrl)
       require(username.isNotBlank()) { "Username is required" }
       require(password.isNotBlank()) { "Password is required" }
+      require(output in setOf("ts", "m3u8")) { "Unsupported Xtream stream format" }
 
       validateAccount(serverUrl, username, password)
       val playlistUrl =
         endpoint(serverUrl, "get.php", username, password)
           .newBuilder()
           .addQueryParameter("type", "m3u_plus")
-          .addQueryParameter("output", "ts")
+          .addQueryParameter("output", output)
           .build()
       val parseResult = M3UParser.parseFromUrl(playlistUrl.toString(), httpClient = httpClient)
       when (parseResult) {
         is M3UParseResult.Success -> Result.success(XtreamCatalog(serverUrl, parseResult))
-        is M3UParseResult.Error -> Result.failure(IllegalArgumentException(parseResult.message))
+        is M3UParseResult.Error -> Result.success(XtreamCatalog(serverUrl, loadApiCatalog(serverUrl, username, password, output)))
       }
     } catch (error: CancellationException) {
       throw error
@@ -81,11 +85,37 @@ class XtreamClient(
       .removeSuffix("/")
   }
 
+  suspend fun checkAccount(rawServerUrl: String, username: String, password: String): Result<String> = try {
+    val info = validateAccount(normalizeServerUrl(rawServerUrl), username, password)
+    val expiry = (info["exp_date"] as? JsonPrimitive)?.content?.toLongOrNull()?.takeIf { it > 0 }
+    val date = expiry?.let { java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it * 1000)) } ?: "Not supplied / unlimited"
+    Result.success("Status: Active\nExpires: $date\nConnections: ${(info["active_cons"] as? JsonPrimitive)?.content ?: "?"} / ${(info["max_connections"] as? JsonPrimitive)?.content ?: "?"}")
+  } catch (error: CancellationException) { throw error } catch (error: Exception) { Result.failure(error) }
+
+  private suspend fun loadApiCatalog(serverUrl: String, username: String, password: String, output: String): M3UParseResult.Success {
+    val url = endpoint(serverUrl, "player_api.php", username, password).newBuilder().addQueryParameter("action", "get_live_streams").build()
+    val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
+    val channels = httpClient.newCall(request).awaitResponse().use { response ->
+      require(response.isSuccessful) { "Xtream channel API returned HTTP ${response.code}" }
+      json.parseToJsonElement(readBoundedUtf8(response.body.byteStream(), 32 * 1024 * 1024)) as? JsonArray
+        ?: throw IllegalArgumentException("Xtream channel API did not return a catalog")
+    }
+    require(channels.size <= 100_000) { "Xtream catalog is too large" }
+    val items = channels.mapNotNull { element ->
+      val channel = element as? JsonObject ?: return@mapNotNull null
+      val id = (channel["stream_id"] as? JsonPrimitive)?.content?.takeIf { it.all(Char::isDigit) && it.isNotEmpty() } ?: return@mapNotNull null
+      val streamUrl = "$serverUrl/".toHttpUrlOrNull()!!.newBuilder().addPathSegment("live").addPathSegment(username).addPathSegment(password).addPathSegment("$id.$output").build().toString()
+      M3UPlaylistItem(url = streamUrl, title = (channel["name"] as? JsonPrimitive)?.content ?: "Channel $id", tvgId = (channel["epg_channel_id"] as? JsonPrimitive)?.content, tvgLogo = (channel["stream_icon"] as? JsonPrimitive)?.content, groupTitle = (channel["category_id"] as? JsonPrimitive)?.content)
+    }
+    require(items.isNotEmpty()) { "Xtream account has no available live channels" }
+    return M3UParseResult.Success("Xtream Live TV", items)
+  }
+
   private suspend fun validateAccount(
     serverUrl: String,
     username: String,
     password: String,
-  ) {
+  ): JsonObject {
     val request =
       Request
         .Builder()
@@ -115,6 +145,9 @@ class XtreamClient(
       if (status.isNotBlank() && !status.equals("active", ignoreCase = true)) {
         throw IllegalArgumentException("Xtream account is not active")
       }
+      val expiry = (userInfo["exp_date"] as? JsonPrimitive)?.content?.toLongOrNull()
+      require(expiry == null || expiry == 0L || expiry > System.currentTimeMillis() / 1000) { "Xtream account has expired" }
+      return userInfo
     }
   }
 
@@ -133,7 +166,7 @@ class XtreamClient(
       ?.build()
       ?: throw IllegalArgumentException("Invalid Xtream server URL")
 
-  private suspend fun readBoundedUtf8(input: java.io.InputStream): String =
+  private suspend fun readBoundedUtf8(input: java.io.InputStream, limit: Int = MAX_AUTH_RESPONSE_BYTES): String =
     runInterruptible(Dispatchers.IO) {
       input.use { stream ->
         val output = ByteArrayOutputStream()
@@ -143,7 +176,7 @@ class XtreamClient(
           val count = stream.read(buffer)
           if (count < 0) break
           total += count
-          if (total > MAX_AUTH_RESPONSE_BYTES) {
+          if (total > limit) {
             throw IllegalArgumentException("Xtream account response is too large")
           }
           output.write(buffer, 0, count)
@@ -153,6 +186,11 @@ class XtreamClient(
     }
 
   companion object {
+    fun outputPreferenceKey(serverUrl: String, username: String): String {
+      val normalized = serverUrl.trim().toHttpUrlOrNull()?.toString()?.trimEnd('/') ?: serverUrl.trim().trimEnd('/')
+      val digest = java.security.MessageDigest.getInstance("SHA-256").digest("$normalized\n$username".toByteArray())
+      return "xtream_output_" + digest.joinToString("") { "%02x".format(it) }
+    }
     private const val USER_AGENT = "mpvRx/2.5"
     private const val MAX_AUTH_RESPONSE_BYTES = 512 * 1024
   }

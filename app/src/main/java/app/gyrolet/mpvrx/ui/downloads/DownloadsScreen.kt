@@ -84,6 +84,7 @@ import app.gyrolet.mpvrx.ui.utils.LocalBackStack
 import app.gyrolet.mpvrx.ui.utils.popSafely
 import app.gyrolet.mpvrx.utils.media.MediaUtils
 import kotlinx.serialization.Serializable
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import java.io.File
 import java.util.Locale
@@ -97,6 +98,10 @@ object DownloadsScreen : Screen {
     val backStack = LocalBackStack.current
     val downloadManager = koinInject<AppDownloadManager>()
     val ytdlpEngine = koinInject<YtdlpDownloadEngine>()
+    val offline = app.gyrolet.mpvrx.domain.torrent.OfflineTorrents
+    LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { offline.initialize(context) } }
+    val torrents by offline.downloads.collectAsState()
+    var pendingTorrentDelete by remember { mutableStateOf<app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.Download?>(null) }
 
     val downloads by downloadManager.downloads.collectAsState()
     val ytdlpJobs by ytdlpEngine.jobs.collectAsState()
@@ -169,7 +174,25 @@ object DownloadsScreen : Screen {
           )
         }
 
-        if (downloads.isEmpty() && ytdlpJobs.isEmpty()) {
+        if (torrents.isNotEmpty()) {
+          item(key = "torrent_header") { SectionHeader("Torrent videos") }
+          items(torrents, key = { "torrent_${it.id}" }) { torrent ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+              Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(torrent.title, fontWeight = FontWeight.Bold)
+                Text(if (torrent.complete) "Downloaded" else "${torrent.status} · ${(torrent.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
+                if (!torrent.complete) LinearProgressIndicator(progress = { torrent.progress }, modifier = Modifier.fillMaxWidth())
+                Row {
+                  TextButton(enabled = torrent.complete, onClick = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }) { Text("Play offline") }
+                  if (!torrent.complete && torrent.status != "Downloading") TextButton(onClick = { offline.resume(context, torrent) }) { Text("Resume") }
+                  TextButton(onClick = { pendingTorrentDelete = torrent }) { Text("Delete") }
+                }
+              }
+            }
+          }
+        }
+
+        if (downloads.isEmpty() && ytdlpJobs.isEmpty() && torrents.isEmpty()) {
           item(key = "empty") {
             EmptyState(
               icon = Icons.RoundedFilled.FileDownload,
@@ -248,6 +271,18 @@ object DownloadsScreen : Screen {
           }
         }
       }
+    }
+
+    pendingTorrentDelete?.let { torrent ->
+      val scope = androidx.compose.runtime.rememberCoroutineScope()
+      val remove: (Boolean) -> Unit = { metadata ->
+        scope.launch {
+          val removed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { offline.remove(torrent, metadata) }
+          if (!removed) Toast.makeText(context, "Close torrent playback before deleting its files", Toast.LENGTH_LONG).show()
+          pendingTorrentDelete = null
+        }
+      }
+      AlertDialog(onDismissRequest = { pendingTorrentDelete = null }, title = { Text("Delete torrent download?") }, text = { Text(torrent.title) }, confirmButton = { TextButton(onClick = { remove(true) }) { Text("Delete video + torrent") } }, dismissButton = { Row { TextButton(onClick = { remove(false) }) { Text("Delete video") }; TextButton(onClick = { pendingTorrentDelete = null }) { Text("Cancel") } } })
     }
 
     pendingDelete?.let { download ->

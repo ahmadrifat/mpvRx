@@ -309,6 +309,20 @@ class ClipOverlayView @JvmOverloads constructor(
   }
 
   private fun saveOrCancelExport() {
+    if (ClipExportManager.state.value is ClipExportState.Exporting || draft?.crop != null) {
+      saveClip(false)
+      return
+    }
+    android.app.AlertDialog.Builder(context)
+      .setTitle("Export clip")
+      .setMessage("Fast lossless export keeps the original codecs and quality. The start moves to the preceding keyframe. Precise export supports exact timing and conversion.")
+      .setPositiveButton("Fast lossless") { _, _ -> saveClip(true) }
+      .setNeutralButton("Precise") { _, _ -> saveClip(false) }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
+  }
+
+  private fun saveClip(lossless: Boolean) {
     val exportState = ClipExportManager.state.value
     if (exportState is ClipExportState.Exporting) {
       ClipExportManager.cancel()
@@ -337,6 +351,7 @@ class ClipOverlayView @JvmOverloads constructor(
           startSeconds = active.startSeconds,
           endSeconds = end,
           crop = active.crop,
+          lossless = lossless,
         ),
       )
     if (!accepted) toast(R.string.clip_export_busy)

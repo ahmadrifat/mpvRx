@@ -24,6 +24,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -40,6 +47,7 @@ class YtdlpDownloadEngine(
 ) {
   enum class JobState { QUEUED, RUNNING, SUCCESS, FAILED, CANCELLED }
 
+  @Serializable
   data class Job(
     val id: Int,
     val url: String,
@@ -61,6 +69,25 @@ class YtdlpDownloadEngine(
   private val nextId = AtomicInteger(1)
   private val _jobs = MutableStateFlow<List<Job>>(emptyList())
   val jobs: StateFlow<List<Job>> = _jobs.asStateFlow()
+  private val historyFile = File(context.filesDir, "ytdlp-downloads.json")
+  private val historyJson = Json { ignoreUnknownKeys = true }
+  init {
+    _jobs.value = runCatching {
+      historyJson.decodeFromString<List<Job>>(historyFile.readText()).map { job ->
+        if (job.isActive) job.copy(state = JobState.FAILED, error = "Download interrupted. Tap Retry to continue.") else job
+      }
+    }.getOrDefault(emptyList())
+    nextId.set((_jobs.value.maxOfOrNull { it.id } ?: 0) + 1)
+    CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+      jobs.collect { saved ->
+        runCatching {
+          val temporary = File(context.filesDir, "ytdlp-downloads.json.tmp")
+          temporary.writeText(historyJson.encodeToString(saved))
+          java.nio.file.Files.move(temporary.toPath(), historyFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }.onFailure { Log.w(TAG, "Unable to persist download history") }
+      }
+    }
+  }
 
   @Volatile
   private var activeProcess: Process? = null
