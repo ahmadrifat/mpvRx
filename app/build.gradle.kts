@@ -191,6 +191,11 @@ android {
     jniLibs {
       useLegacyPackaging = true
       pickFirsts += "**/libc++_shared.so"
+      // Universal APKs also collect prebuilt AAR/jniLibs binaries. Split filters alone
+      // do not remove those, so apply the requested architecture set to packaging.
+      (setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") - activeAbis.toSet()).forEach { abi ->
+        excludes += "**/$abi/*.so"
+      }
     }
   }
 
