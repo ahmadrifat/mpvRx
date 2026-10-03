@@ -40,7 +40,7 @@ enum class PlayerButton(
   SUBTITLES(Icons.RoundedFilled.Subtitles),
   CLIP(Icons.RoundedFilled.ContentCut),
   DOWNLOAD(Icons.RoundedFilled.Download),
-  AUDIO_DOWNLOAD(Icons.RoundedFilled.Headset),
+  AUDIO_DOWNLOAD(Icons.RoundedFilled.AudioDownload),
   MORE_OPTIONS(Icons.RoundedFilled.MoreVert),
   CURRENT_CHAPTER(Icons.RoundedFilled.Bookmarks), // <-- CHANGED ICON
   REPEAT_MODE(Icons.RoundedFilled.Repeat),

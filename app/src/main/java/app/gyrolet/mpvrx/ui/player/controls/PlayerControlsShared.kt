@@ -131,6 +131,15 @@ fun RenderPlayerButton(
   buttonSize: Dp = 40.dp,
   compact: Boolean = false,
 ) {
+  if (button == PlayerButton.AUDIO_DOWNLOAD) {
+    val available = androidx.compose.runtime.produceState(initialValue = false) {
+      while (true) {
+        value = PlaybackSession.canExportAudio()
+        kotlinx.coroutines.delay(250)
+      }
+    }.value
+    if (!available) return
+  }
   PlayerButtonContentTheme {
     val controlColor =
       if (compact) androidx.compose.material3.LocalContentColor.current else defaultControlColor

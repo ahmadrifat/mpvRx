@@ -1212,6 +1212,18 @@ object PlaybackSession : MPVLib.EventObserver {
     withCore(Unit) { MPVLib.setPropertyFloat(property, value) }
   }
 
+  fun canExportAudio(): Boolean = withReadyCore(false) {
+    val item = state.value.currentItem ?: return@withReadyCore false
+    val registration = activeNetworkStream
+    val hls = registration?.hlsProxy
+    val manifestLive = hls?.liveStatus(registration?.streamId.orEmpty())
+    if (hls != null && manifestLive == null) return@withReadyCore false
+    app.gyrolet.mpvrx.ui.player.clip.AudioExportAvailability.allowed(
+      item.originalUri, MPVLib.getPropertyDouble("duration"),
+      MPVLib.getPropertyBoolean("seekable"), manifestLive,
+    )
+  }
+
   fun getPropertyBoolean(property: String): Boolean? = withReadyCore(null) { MPVLib.getPropertyBoolean(property) }
 
   internal fun audiobookProgress(reachedEnd: Boolean = false): AudiobookProgress? = withCore(null) {

@@ -75,6 +75,7 @@ class HlsStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0) {
     val headers: Map<String, String>,
     val userAgent: String?,
   ) {
+    @Volatile internal var isLive: Boolean? = null
     internal val targetUrlsByToken = LinkedHashMap<String, String>(16, 0.75f, true)
     internal val targetTokensByUrl = mutableMapOf<String, String>()
   }
@@ -150,6 +151,8 @@ class HlsStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0) {
     val token = tokenByRegistration.remove(streamId) ?: return
     sessionsByToken.remove(token)
   }
+
+  fun liveStatus(streamId: String): Boolean? = tokenByRegistration[streamId]?.let { sessionsByToken[it]?.isLive }
 
   override fun serve(session: IHTTPSession): Response {
     val uri = session.uri
@@ -290,6 +293,9 @@ class HlsStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0) {
     headOnly: Boolean,
     masterPlaylist: Boolean,
   ): Response {
+    if (entry.body.lineSequence().any { it.trim().startsWith("#EXTINF:") }) {
+      session.isLive = !entry.body.lineSequence().any { it.trim().equals("#EXT-X-ENDLIST", ignoreCase = true) }
+    }
     val rewritten =
       if (masterPlaylist) {
         rewriteMasterManifest(entry.body, token, session, entry.finalUrl)

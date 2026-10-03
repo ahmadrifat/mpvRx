@@ -99,6 +99,7 @@ private const val MIN_CLIP_SECONDS = 0.05
 
 private data class ClipPanelState(
   val audioOnly: Boolean = false,
+  val audioFormat: AudioExportFormat = AudioExportFormat.M4A,
   val clipDuration: String? = null,
   val startSeconds: Float = 0f,
   val endSeconds: Float? = null,
@@ -131,6 +132,7 @@ class ClipOverlayView @JvmOverloads constructor(
   private var panelState by mutableStateOf(ClipPanelState())
 
   private var audioOnly = false
+  private var audioFormat = AudioExportFormat.M4A
   private var draft: ClipDraft? = null
   private var cropView: CropSelectionView? = null
   private var cropControls: ComposeView? = null
@@ -190,10 +192,12 @@ class ClipOverlayView @JvmOverloads constructor(
     if (cropView != null) true else super.onTouchEvent(event)
 
   fun openClip(audioOnly: Boolean = false): Boolean {
-    if (ClipExportManager.state.value !is ClipExportState.Exporting && this.audioOnly != audioOnly) {
+    if (ClipExportManager.state.value !is ClipExportState.Exporting && (this.audioOnly != audioOnly || draft == null)) {
       draft = null
       this.audioOnly = audioOnly
+      audioFormat = AudioExportFormat.M4A
     }
+    if (audioOnly && !PlaybackSession.canExportAudio()) return false
     return beginClip()
   }
 
@@ -203,6 +207,7 @@ class ClipOverlayView @JvmOverloads constructor(
 
     ClipEditorPanel(
       state = panelState,
+      onFormatChange = { audioFormat = it; refreshDraftUi() },
       onRangeChange = ::updateClipRange,
       onStartTimeChange = ::updateClipStart,
       onEndTimeChange = ::updateClipEnd,
@@ -348,6 +353,7 @@ class ClipOverlayView @JvmOverloads constructor(
           endSeconds = end,
           crop = if (audioOnly) null else active.crop,
           audioOnly = audioOnly,
+          audioFormat = audioFormat,
         ),
       )
     if (!accepted) toast(R.string.clip_export_busy)
@@ -534,6 +540,7 @@ class ClipOverlayView @JvmOverloads constructor(
     panelState =
       panelState.copy(
         audioOnly = audioOnly,
+        audioFormat = audioFormat,
         clipDuration = active.endSeconds?.let { formatTime((it - active.startSeconds).coerceAtLeast(0.0)) },
         startSeconds = active.startSeconds.toFloat(),
         endSeconds = active.endSeconds?.toFloat(),
@@ -628,6 +635,7 @@ class ClipOverlayView @JvmOverloads constructor(
 @Composable
 private fun ClipEditorPanel(
   state: ClipPanelState,
+  onFormatChange: (AudioExportFormat) -> Unit,
   onRangeChange: (Float, Float, Float) -> Unit,
   onStartTimeChange: (Float) -> Unit,
   onEndTimeChange: (Float) -> Unit,
@@ -652,7 +660,7 @@ private fun ClipEditorPanel(
             .padding(top = MaterialTheme.spacing.small),
       ) {
         AppIcon(
-          imageVector = if (state.audioOnly) Icons.RoundedFilled.Headset else Icons.RoundedFilled.ContentCut,
+          imageVector = if (state.audioOnly) Icons.RoundedFilled.AudioDownload else Icons.RoundedFilled.ContentCut,
           contentDescription = null,
           tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.size(22.dp),
@@ -675,6 +683,7 @@ private fun ClipEditorPanel(
   ) {
     ClipEditorPanelContent(
       state = state,
+      onFormatChange = onFormatChange,
       startTimeValid = startTimeValid,
       endTimeValid = endTimeValid,
       onStartTimeValidityChange = { startTimeValid = it },
@@ -694,6 +703,7 @@ private fun ClipEditorPanel(
 @Composable
 private fun ClipEditorPanelContent(
   state: ClipPanelState,
+  onFormatChange: (AudioExportFormat) -> Unit,
   startTimeValid: Boolean,
   endTimeValid: Boolean,
   onStartTimeValidityChange: (Boolean) -> Unit,
@@ -771,7 +781,7 @@ private fun ClipEditorPanelContent(
         text = state.clipDuration ?: "--:--",
         modifier = Modifier.weight(0.7f),
       )
-      ClipMetadata(
+      if (!state.audioOnly) ClipMetadata(
         icon = if (state.audioOnly) Icons.RoundedFilled.Headset else Icons.RoundedFilled.AspectRatio,
         text =
           if (state.audioOnly) "M4A audio" else state.crop?.let { stringResource(R.string.clip_crop_size, it.width, it.height) }
@@ -804,6 +814,25 @@ private fun ClipEditorPanelContent(
       }
     }
 
+    if (state.audioOnly) Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      AudioExportFormat.entries.forEach { format ->
+        val selected = state.audioFormat == format
+        androidx.compose.material3.OutlinedButton(
+          onClick = { onFormatChange(format) },
+          enabled = !state.exporting,
+          border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+          colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+            contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
+          ),
+          contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
+          modifier = Modifier.weight(1f).height(48.dp),
+        ) { Text(format.name, maxLines = 1) }
+      }
+    }
     if (!state.audioOnly) OutlinedButton(
       onClick = onCrop,
       enabled = !state.exporting,

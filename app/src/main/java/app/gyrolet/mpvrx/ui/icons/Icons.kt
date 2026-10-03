@@ -139,6 +139,7 @@ object Icons {
     val Gradient by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Gradient) }
     val Grain by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Grain) }
     val GridView by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Grid_view) }
+    val AudioDownload by lazy(LazyThreadSafetyMode.NONE) { AppIcon(AudioDownloadVector) }
     val Headset by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Headphones) }
     val HdrOff by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Hdr_off) }
     val HdrOn by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Hdr_on) }
@@ -382,6 +383,7 @@ object Icons {
     val Gradient get() = Shared.Gradient
     val Grain get() = Shared.Grain
     val GridView get() = Shared.GridView
+    val AudioDownload get() = Shared.AudioDownload
     val Headset get() = Shared.Headset
     val HdrOff get() = Shared.HdrOff
     val HdrOn get() = Shared.HdrOn
@@ -734,6 +736,63 @@ private val PostProcessingVector: ImageVector by lazy(LazyThreadSafetyMode.NONE)
       lineTo(21.1f, 2.4f)
       lineTo(20.0f, 2.0f)
       lineTo(21.1f, 1.6f)
+      close()
+    }
+  }.build()
+}
+
+/** Rounded filled headphones with the existing download arrow/tray inside the earcups. */
+private val AudioDownloadVector: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+  ImageVector.Builder(name = "AudioDownload", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f).apply {
+    path(fill = SolidColor(Color.Black)) {
+      moveTo(12f, 2f)
+      curveTo(6.48f, 2f, 2f, 6.48f, 2f, 12f)
+      lineTo(2f, 18f)
+      quadTo(2f, 21f, 5f, 21f)
+      lineTo(6f, 21f)
+      quadTo(7f, 21f, 7f, 20f)
+      lineTo(7f, 14f)
+      quadTo(7f, 13f, 6f, 13f)
+      lineTo(4f, 13f)
+      lineTo(4f, 12f)
+      curveTo(4f, 7.58f, 7.58f, 4f, 12f, 4f)
+      curveTo(16.42f, 4f, 20f, 7.58f, 20f, 12f)
+      lineTo(20f, 13f)
+      lineTo(18f, 13f)
+      quadTo(17f, 13f, 17f, 14f)
+      lineTo(17f, 20f)
+      quadTo(17f, 21f, 18f, 21f)
+      lineTo(19f, 21f)
+      quadTo(22f, 21f, 22f, 18f)
+      lineTo(22f, 12f)
+      curveTo(22f, 6.48f, 17.52f, 2f, 12f, 2f)
+      close()
+      moveTo(11f, 9f)
+      quadTo(11f, 8f, 12f, 8f)
+      quadTo(13f, 8f, 13f, 9f)
+      lineTo(13f, 14.6f)
+      lineTo(14.3f, 13.3f)
+      quadTo(15f, 12.6f, 15.7f, 13.3f)
+      quadTo(16.4f, 14f, 15.7f, 14.7f)
+      lineTo(12.7f, 17.7f)
+      quadTo(12f, 18.4f, 11.3f, 17.7f)
+      lineTo(8.3f, 14.7f)
+      quadTo(7.6f, 14f, 8.3f, 13.3f)
+      quadTo(9f, 12.6f, 9.7f, 13.3f)
+      lineTo(11f, 14.6f)
+      close()
+      moveTo(9f, 19f)
+      quadTo(8f, 19f, 8f, 20f)
+      lineTo(8f, 21f)
+      quadTo(8f, 22f, 9f, 22f)
+      lineTo(15f, 22f)
+      quadTo(16f, 22f, 16f, 21f)
+      lineTo(16f, 20f)
+      quadTo(16f, 19f, 15f, 19f)
+      quadTo(14f, 19f, 14f, 20f)
+      lineTo(10f, 20f)
+      quadTo(10f, 19f, 9f, 19f)
       close()
     }
   }.build()

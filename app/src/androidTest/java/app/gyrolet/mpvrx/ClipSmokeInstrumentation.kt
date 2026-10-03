@@ -9,7 +9,12 @@ import java.io.File
 
 /** Runs on a real Android runtime, without a third-party test runner. */
 class ClipSmokeInstrumentation : Instrumentation() {
-  override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+  private var keepFixtures = false
+  override fun onCreate(arguments: Bundle?) {
+    super.onCreate(arguments)
+    keepFixtures = arguments?.getString("keepFixtures") == "true"
+    start()
+  }
   override fun onStart() {
     val result = Bundle()
     try {
@@ -71,9 +76,28 @@ class ClipSmokeInstrumentation : Instrumentation() {
         check(audioJson.getJSONArray("streams").getJSONObject(0).getString("codec_type") == "audio")
         check(kotlin.math.abs(audioJson.getJSONObject("format").getString("duration").toDouble() - 0.667) <= 0.002)
         check(kotlin.math.abs(audioJson.getJSONArray("streams").getJSONObject(0).getString("start_time").toDouble()) < 0.002)
+        app.gyrolet.mpvrx.ui.player.clip.AudioExportFormat.entries.filter { it.name != "M4A" }.forEach { format ->
+          val file = File(directory, "audio.${format.extension}")
+          val error = app.gyrolet.mpvrx.ui.player.clip.AudioClipExporter.export(context,
+            source.absolutePath, source.absolutePath, file.absolutePath, 1.125, 1.792,
+            emptyMap(), {}, {}, format)
+          check(error == null) { "${format.name}: $error" }
+          val probe = FfmpegRuntime.run(context, listOf("-v", "error", "-show_entries",
+            "stream=codec_type,codec_name", "-of", "json", file.absolutePath), probe = true)
+          val tracks = org.json.JSONObject(probe.second).getJSONArray("streams")
+          check(tracks.length() == 1 && tracks.getJSONObject(0).getString("codec_type") == "audio")
+          val pcm = File(directory, "decoded-${format.name}.pcm")
+          val decoded = FfmpegRuntime.run(context, listOf("-y", "-i", file.absolutePath,
+            "-ac", "1", "-ar", "48000", "-f", "s16le", pcm.absolutePath))
+          check(decoded.first == 0)
+          val seconds = pcm.length() / 96000.0
+          // Raw AAC cannot carry gapless delay/padding metadata; MP3/M4A can.
+          val tolerance = if (format.name == "AAC") 0.10 else 0.002
+          check(kotlin.math.abs(seconds - 0.667) <= tolerance) { "${format.name} decoded duration $seconds" }
+        }
         testConcurrentDirectDownloads(context, directory)
-        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; audio-only M4A trim with 2 ms duration/start checks")
-        directory.deleteRecursively()
+        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; M4A/MP3/WAV/AAC exports, decoded trim checks, M4A 2 ms duration/start checks")
+        if (!keepFixtures) directory.deleteRecursively()
       }
       finish(android.app.Activity.RESULT_OK, result)
     } catch (error: Throwable) {

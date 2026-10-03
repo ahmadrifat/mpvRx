@@ -52,6 +52,7 @@ data class ClipRequest(
   val endSeconds: Double,
   val crop: ClipCrop? = null,
   val audioOnly: Boolean = false,
+  val audioFormat: AudioExportFormat = AudioExportFormat.M4A,
 )
 
 sealed interface ClipExportState {
@@ -119,9 +120,10 @@ object ClipExportManager {
       var temporaryOutput: File? = null
       try {
         resolvedSource = resolveSource(appContext, request.item)
-        temporaryOutput = createTemporaryOutput(appContext, request.audioOnly)
+        temporaryOutput = createTemporaryOutput(appContext, request.audioOnly, request.audioFormat)
 
         val error = if (request.audioOnly) AudioClipExporter.export(
+          format = request.audioFormat,
           context = appContext, source = resolvedSource.uri, original = request.item.originalUri,
           output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
           headers = request.item.headers,
@@ -150,9 +152,9 @@ object ClipExportManager {
           error("Export finished without producing a media file")
         }
 
-        val displayName = buildDisplayName(request.item, request.audioOnly)
+        val displayName = buildDisplayName(request.item, request.audioOnly, request.audioFormat)
         ClipJobs.update(clipJobId, status = "Saving")
-        val savedUri = saveToMediaLibrary(appContext, temporaryOutput, displayName, request.audioOnly)
+        val savedUri = saveToMediaLibrary(appContext, temporaryOutput, displayName, request.audioOnly, request.audioFormat)
         temporaryOutput = null
         ClipJobs.update(clipJobId, status = "Completed", progress = 1f, output = savedUri.toString())
         _state.value = ClipExportState.Success(savedUri, displayName)
@@ -197,9 +199,9 @@ object ClipExportManager {
     }
   }
 
-  private fun createTemporaryOutput(context: Context, audioOnly: Boolean): File {
+  private fun createTemporaryOutput(context: Context, audioOnly: Boolean, format: AudioExportFormat): File {
     val directory = File(context.cacheDir, "clips").apply { mkdirs() }
-    return File.createTempFile("mpvrx-clip-", if (audioOnly) ".m4a" else ".mp4", directory).apply { delete() }
+    return File.createTempFile("mpvrx-clip-", if (audioOnly) ".${format.extension}" else ".mp4", directory).apply { delete() }
   }
 
   private fun resolveSource(
@@ -253,7 +255,7 @@ object ClipExportManager {
     return ResolvedSource(uri = source)
   }
 
-  private fun buildDisplayName(item: PlaybackItem, audioOnly: Boolean): String {
+  private fun buildDisplayName(item: PlaybackItem, audioOnly: Boolean, format: AudioExportFormat): String {
     val base =
       item.title
         ?.substringBeforeLast('.')
@@ -261,7 +263,7 @@ object ClipExportManager {
         ?.takeIf { it.isNotBlank() }
         ?: "MPVRX"
     val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-    return if (audioOnly) "${base}_audio_$stamp.m4a" else "${base}_clip_$stamp.mp4"
+    return if (audioOnly) "${base}_audio_$stamp.${format.extension}" else "${base}_clip_$stamp.mp4"
   }
 
   private fun saveToMediaLibrary(
@@ -269,8 +271,9 @@ object ClipExportManager {
     source: File,
     displayName: String,
     audioOnly: Boolean,
+    format: AudioExportFormat,
   ): Uri {
-    val mimeType = if (audioOnly) "audio/mp4" else "video/mp4"
+    val mimeType = if (audioOnly) format.mimeType else "video/mp4"
     val mediaDirectory = if (audioOnly) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
     val collection = if (audioOnly) MediaStore.Audio.Media.EXTERNAL_CONTENT_URI else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

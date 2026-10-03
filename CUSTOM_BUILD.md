@@ -1,16 +1,16 @@
-# mpvRx 2.7.2-custom.4
+# mpvRx 2.7.2-cs.5
 
 Based on upstream 594bfc67, with the previous custom source checkpoint preserved in Git.
 
 ## Installation
 
-Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.custom. Version code: 40. It updates the earlier custom APK signed with the same private key and retains its data. It also coexists with the author's original app. An APK with the original package but a different signing certificate cannot update the author's installation.
+Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.cs. Version code: 50. The package ID changed from .custom to .cs at the user's request. This release installs separately from the earlier custom app and does not automatically transfer its settings/playlists. It coexists with both that app and the author's original app. Subsequent .cs releases with the same signing key can update this installation. An APK with the original package but a different signing certificate cannot update the author's installation.
 
 ## Changes
 
 - Displayed name is now mpvRx; package and signing identity remain unchanged for in-place upgrades.
 - Panel defaults follow the requested screenshots. Video/audio download controls are before More in Top Right and Portrait Bottom. Existing customized selections remain saved; Reset defaults applies the full default panel configuration.
-- Configurable Download audio button opens the existing millisecond trim editor, defaults to the full duration when known, and saves AAC/M4A under Music/mpvRx/Clips. Only audio is encoded; extractor sites use separate audio where available. Progress, completion, retry and deletion share Downloads with clips. No video conversion runs for audio exports. A media item must have an accessible audio track.
+- Configurable blended headphone/download icon opens the existing millisecond trim editor, defaults to the full duration when known, and saves M4A, MP3, WAV or raw AAC under Music/mpvRx/Clips. M4A is selected initially. Only audio is encoded; extractor sites use separate audio where available. Progress, completion, retry and deletion share Downloads with clips. No video conversion runs for audio exports. Audio mode has no crop controls/information, preserves Start/End labels, and uses outlined format buttons with a tonal fill for the selected format. Live IPTV/HLS/non-seekable network media hide the audio button; finite duration must be known before a full range can be selected. A media item must have an accessible audio track.
 - M3U imports follow HTTP redirects and detect Xtream get.php credentials at the destination, even if the returned body is an HLS manifest or account error. This enables Xtream catalog, categories and account information after shortened links. Browser/JavaScript/CAPTCHA shorteners are not supported. No provider link was supplied for live verification.
 - Playback buffer limits and live manifest caching have not been changed.
 
@@ -41,7 +41,7 @@ Keep feature changes in separate commits. Fetch and merge origin/master periodic
 
 ## Verification and limits
 
-See Build-verification-v4.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
+See Build-verification-v5.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
 
 Clipping cannot recover past live segments no longer offered by the server, bypass DRM, or promise support for every codec. Encoding is necessary for frame-accurate boundaries that cannot be safely copied. Clip encoding has cancel/retry, not pause/resume. Android force-stop and foreground-service time limits can interrupt work. Offline torrent storage is private and removed when app data is cleared or the app uninstalled.
 
@@ -58,3 +58,5 @@ The exact warning "Play Protect hasn't seen an app from this developer before. I
 Official references:
 - https://developers.google.com/android/play-protect/warning-strings
 - https://developers.google.com/android/play-protect/warning-dev-guidance
+
+Raw AAC (.aac/ADTS) lacks the gapless metadata used by M4A/MP3 to describe encoder delay and padding. The requested interval is trimmed before encoding, but raw AAC playback can include codec-frame padding. Choose M4A, MP3 or WAV when precise decoded clip length matters. WAV is uncompressed and larger; transcoding cannot recover lost source quality.

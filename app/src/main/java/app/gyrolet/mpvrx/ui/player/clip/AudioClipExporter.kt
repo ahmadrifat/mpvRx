@@ -18,7 +18,7 @@ import java.util.Locale
 internal object AudioClipExporter {
   suspend fun export(context: Context, source: String, original: String, output: String,
     start: Double, end: Double, headers: Map<String, String>,
-    onProgress: (Double) -> Unit, onStage: (String) -> Unit): String? {
+    onProgress: (Double) -> Unit, onStage: (String) -> Unit, format: AudioExportFormat = AudioExportFormat.M4A): String? {
     var copiedInput: File? = null
     try {
       onStage("Preparing")
@@ -50,7 +50,11 @@ internal object AudioClipExporter {
         addAll(listOf("-ss", "%.6f".format(Locale.US, start), "-i", input,
           "-t", duration, "-map", "0:a:0", "-vn", "-sn", "-dn",
           "-af", "atrim=start=0:end=$duration,asetpts=PTS-STARTPTS",
-          "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", output))
+          "-c:a", format.encoder))
+        if (format != AudioExportFormat.WAV) addAll(listOf("-b:a", "192k"))
+        if (format == AudioExportFormat.M4A) addAll(listOf("-movflags", "+faststart"))
+        if (format == AudioExportFormat.AAC) addAll(listOf("-f", "adts"))
+        add(output)
       }
       onStage("Clipping")
       val result = FfmpegRuntime.run(context, args) { line ->
@@ -59,13 +63,24 @@ internal object AudioClipExporter {
         }
       }
       if (result.first != 0) return "Could not save audio. Check that this media has an audio track and that the source is available."
-      val probe = FfmpegRuntime.run(context, listOf("-v", "error", "-show_entries",
-        "format=duration:stream=codec_type,start_time", "-of", "json", output), probe = true)
+      val probeArgs = buildList {
+        addAll(listOf("-v", "error"))
+        if (format == AudioExportFormat.AAC) add("-count_packets")
+        addAll(listOf("-show_entries", "format=duration:stream=codec_type,start_time,sample_rate,nb_read_packets", "-of", "json", output))
+      }
+      val probe = FfmpegRuntime.run(context, probeArgs, probe = true)
       if (probe.first != 0) return "Could not verify the saved audio"
       val json = org.json.JSONObject(probe.second)
-      val actualDuration = json.optJSONObject("format")?.optString("duration")?.toDoubleOrNull()
       val tracks = json.optJSONArray("streams")
-      if (actualDuration == null || kotlin.math.abs(actualDuration - (end - start)) > 0.03 ||
+      // ADTS has no duration header. Its bitrate-based estimate can drift over long files;
+      // count the AAC-LC packets emitted by our encoder instead of rejecting valid exports.
+      val actualDuration = if (format == AudioExportFormat.AAC) {
+        val track = tracks?.optJSONObject(0)
+        val packets = track?.optString("nb_read_packets")?.toDoubleOrNull()
+        val rate = track?.optString("sample_rate")?.toDoubleOrNull()
+        if (packets != null && rate != null && rate > 0) packets * 1024.0 / rate else null
+      } else json.optJSONObject("format")?.optString("duration")?.toDoubleOrNull()
+      if (actualDuration == null || kotlin.math.abs(actualDuration - (end - start)) > (if (format == AudioExportFormat.AAC || format == AudioExportFormat.MP3) 0.10 else 0.03) ||
         tracks == null || tracks.length() != 1 || tracks.getJSONObject(0).optString("codec_type") != "audio") {
         return "The saved audio did not pass timestamp validation"
       }
