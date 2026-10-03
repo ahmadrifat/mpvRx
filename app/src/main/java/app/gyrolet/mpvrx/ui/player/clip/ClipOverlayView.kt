@@ -308,21 +308,9 @@ class ClipOverlayView @JvmOverloads constructor(
     playerViewModel()?.autoHideControls()
   }
 
-  private fun saveOrCancelExport() {
-    if (ClipExportManager.state.value is ClipExportState.Exporting || draft?.crop != null) {
-      saveClip(false)
-      return
-    }
-    android.app.AlertDialog.Builder(context)
-      .setTitle("Export clip")
-      .setMessage("Fast lossless export keeps the original codecs and quality. The start moves to the preceding keyframe. Precise export supports exact timing and conversion.")
-      .setPositiveButton("Fast lossless") { _, _ -> saveClip(true) }
-      .setNeutralButton("Precise") { _, _ -> saveClip(false) }
-      .setNegativeButton(android.R.string.cancel, null)
-      .show()
-  }
+  private fun saveOrCancelExport() { saveClip() }
 
-  private fun saveClip(lossless: Boolean) {
+  private fun saveClip() {
     val exportState = ClipExportManager.state.value
     if (exportState is ClipExportState.Exporting) {
       ClipExportManager.cancel()
@@ -351,7 +339,6 @@ class ClipOverlayView @JvmOverloads constructor(
           startSeconds = active.startSeconds,
           endSeconds = end,
           crop = active.crop,
-          lossless = lossless,
         ),
       )
     if (!accepted) toast(R.string.clip_export_busy)
@@ -587,16 +574,8 @@ class ClipOverlayView @JvmOverloads constructor(
   private fun currentPosition(): Double? = PlaybackSession.getPropertyDouble("time-pos")
 
   private fun formatTime(seconds: Double): String {
-    val totalTenths = (seconds.coerceAtLeast(0.0) * 10.0).roundToInt()
-    val hours = totalTenths / 36_000
-    val minutes = (totalTenths / 600) % 60
-    val secs = (totalTenths / 10) % 60
-    val tenths = totalTenths % 10
-    return if (hours > 0) {
-      "%d:%02d:%02d.%d".format(Locale.US, hours, minutes, secs, tenths)
-    } else {
-      "%02d:%02d.%d".format(Locale.US, minutes, secs, tenths)
-    }
+    val ms = (seconds.coerceAtLeast(0.0) * 1000).toLong()
+    return "%02d:%02d:%02d.%03d".format(Locale.US, ms / 3600000, (ms / 60000) % 60, (ms / 1000) % 60, ms % 1000)
   }
 
   private fun toast(message: String) {

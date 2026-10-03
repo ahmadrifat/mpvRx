@@ -71,6 +71,8 @@ class AppDownloadManager(
       readTimeout(60, TimeUnit.SECONDS)
     }
 
+  private val pausedIds: MutableSet<Long> = Collections.synchronizedSet(mutableSetOf<Long>())
+  private val calls = java.util.concurrent.ConcurrentHashMap<Long, okhttp3.Call>()
   private val cancelledIds: MutableSet<Long> = Collections.synchronizedSet(mutableSetOf<Long>())
 
   private val _activeSnapshot = MutableStateFlow<ActiveSnapshot?>(null)
@@ -171,6 +173,7 @@ class AppDownloadManager(
     onUpdate: (ActiveSnapshot) -> Unit,
   ) {
     val id = entity.id
+    if (id in pausedIds) { dao.update(entity.copy(status = AppDownloadStatus.PAUSED.name)); return }
     cancelledIds.remove(id)
     dao.update(entity.copy(status = AppDownloadStatus.RUNNING.name))
 
@@ -181,19 +184,30 @@ class AppDownloadManager(
     val result =
       runCatching {
         if (!directory.exists()) directory.mkdirs()
-        var resumeFrom = if (partFile.isFile) partFile.length() else 0L
+        val validatorFile = File(directory, entity.fileName + PART_SUFFIX + ".validator")
+        val validator = runCatching { validatorFile.readText() }.getOrNull()?.takeIf(String::isNotBlank)
+        var resumeFrom = if (partFile.isFile && validator != null) partFile.length() else 0L
+        if (resumeFrom == 0L) partFile.delete()
 
         val requestBuilder = Request.Builder().url(entity.url).get()
         decodeHeaders(entity.stagingPath).forEach { (key, value) -> requestBuilder.header(key, value) }
-        if (resumeFrom > 0) requestBuilder.header("Range", "bytes=$resumeFrom-")
+        if (resumeFrom > 0) {
+          requestBuilder.header("Range", "bytes=$resumeFrom-")
+          requestBuilder.header("If-Range", validator!!)
+        }
 
-        httpClient.newCall(requestBuilder.build()).awaitResponse().use { response ->
+        val call = httpClient.newCall(requestBuilder.build())
+        calls[id] = call
+        if (id in pausedIds || id in cancelledIds) call.cancel()
+        call.awaitResponse().use { response ->
           if (resumeFrom > 0 && response.code != 206) {
             // Server ignored the range; start over.
             partFile.delete()
             resumeFrom = 0
           }
           check(response.isSuccessful) { "HTTP ${response.code}" }
+          if (resumeFrom > 0) require(ResumeResponse.validRange(resumeFrom, response.code, response.header("Content-Range"))) { "Invalid resume range" }
+          (response.header("ETag")?.takeUnless { it.startsWith("W/") } ?: response.header("Last-Modified"))?.let { validatorFile.writeText(it) }
           val body = response.body
           val totalBytes =
             body.contentLength().takeIf { it > 0 }?.plus(resumeFrom) ?: 0L
@@ -207,6 +221,7 @@ class AppDownloadManager(
             FileOutputStream(partFile, resumeFrom > 0).use { output ->
               val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
               while (true) {
+                if (id in pausedIds) throw IOException("Paused")
                 if (id in cancelledIds) throw CancelledDownloadException()
                 val read = input.read(buffer)
                 if (read < 0) break
@@ -244,6 +259,7 @@ class AppDownloadManager(
           }
 
           check(partFile.renameTo(finalFile)) { "Could not finalize file in download folder" }
+          validatorFile.delete()
           totalBytes.takeIf { it > 0 } ?: finalFile.length()
         }
       }
@@ -268,6 +284,7 @@ class AppDownloadManager(
             runCatching { partFile.delete() }
             dao.findById(id)?.let { dao.update(it.copy(status = AppDownloadStatus.CANCELLED.name)) }
           }
+          id in pausedIds -> dao.findById(id)?.let { dao.update(it.copy(status = AppDownloadStatus.PAUSED.name, failureReason = null)) }
           else -> {
             Log.e(TAG, "Download failed for ${entity.url}", error)
             // Keep the .part file so retry resumes from where it stopped.
@@ -282,6 +299,7 @@ class AppDownloadManager(
           }
         }
       }
+    calls.remove(id)
     cancelledIds.remove(id)
   }
 
@@ -337,12 +355,20 @@ class AppDownloadManager(
       }.orEmpty()
   }
 
+  fun pause(id: Long) {
+    pausedIds.add(id)
+    calls[id]?.cancel()
+    scope.launch { dao.findById(id)?.takeIf { it.status == AppDownloadStatus.QUEUED.name }?.let { dao.update(it.copy(status = AppDownloadStatus.PAUSED.name)) } }
+  }
+  fun resume(id: Long) { pausedIds.remove(id); retry(id) }
   fun cancel(id: Long) {
     cancelledIds.add(id)
+    pausedIds.remove(id)
+    calls[id]?.cancel()
     scope.launch {
       val entity = dao.findById(id) ?: return@launch
       // The worker handles rows it is streaming; queued rows are finalized here.
-      if (entity.status == AppDownloadStatus.QUEUED.name) {
+      if (entity.status == AppDownloadStatus.QUEUED.name || entity.status == AppDownloadStatus.PAUSED.name) {
         dao.update(entity.copy(status = AppDownloadStatus.CANCELLED.name))
       }
     }
@@ -368,7 +394,8 @@ class AppDownloadManager(
   ) {
     scope.launch {
       val entity = download.entity
-      if (download.isActive) cancelledIds.add(entity.id)
+      if (download.isActive) { cancelledIds.add(entity.id); calls[entity.id]?.cancel() }
+      pausedIds.remove(entity.id)
       runCatching { File(entity.dirPath, entity.fileName + PART_SUFFIX).delete() }
       if (deleteFile) {
         sidecarSubtitles(download).forEach { runCatching { it.delete() } }

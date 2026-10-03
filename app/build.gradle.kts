@@ -43,6 +43,7 @@ android {
   testBuildType = "custom"
 
   defaultConfig {
+    testInstrumentationRunner = "app.gyrolet.mpvrx.ClipSmokeInstrumentation"
     applicationId = "app.gyrolet.mpvrx"
     minSdk = 26
     targetSdk = 36
@@ -121,7 +122,7 @@ android {
     create("custom") {
       initWith(getByName("release"))
       applicationIdSuffix = ".custom"
-      versionNameSuffix = "-custom.1"
+      versionNameSuffix = "-custom.2"
       isMinifyEnabled = false
       isShrinkResources = false
       signingConfig = if (localProperties.getProperty("custom.storeFile") != null) {
@@ -232,7 +233,7 @@ androidComponents {
       }
 
       val channelVersionCode =
-        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 1)
+        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 2)
         else if (variant.buildType == "preview") previewVersionCode else (output.versionCode.orNull ?: stableVersionCode)
       output.versionCode.set(channelVersionCode * 10 + (abiCodes[abi] ?: 0))
     }
@@ -360,6 +361,7 @@ fun runCommand(command: String): String? =
     val parts = command.split(' ')
     val process =
       ProcessBuilder(parts)
+        .directory(rootProject.projectDir)
         .redirectErrorStream(true)
         .start()
 
@@ -369,8 +371,7 @@ fun runCommand(command: String): String? =
         .readText()
         .trim()
 
-    process.waitFor()
-    output.ifEmpty { null }
+    if (process.waitFor() == 0) output.ifEmpty { null } else null
   } catch (e: Exception) {
     null
   }

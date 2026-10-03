@@ -18,6 +18,7 @@ enum class AppDownloadStatus {
   SUCCESS,
   FAILED,
   CANCELLED,
+  PAUSED,
   ;
 
   companion object {

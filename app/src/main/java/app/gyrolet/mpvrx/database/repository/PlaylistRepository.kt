@@ -229,6 +229,71 @@ class PlaylistRepository(
   private fun isPathMatching(pathA: String, pathB: String): Boolean =
     pathA.isNotBlank() && pathB.isNotBlank() && playlistPathKey(pathA) == playlistPathKey(pathB)
 
+  data class Configuration(val name: String, val url: String = "", val username: String = "", val password: String = "", val mac: String = "", val userAgent: String = "", val mag: Boolean = false, val hls: Boolean = true)
+
+  suspend fun configuration(id: Int): Result<Configuration> = withContext(Dispatchers.IO) {
+    try {
+      val p = getPlaylistById(id) ?: error("Playlist not found")
+      val source = p.m3uSourceUrl.orEmpty()
+      if (source.startsWith("mpvrx-stalker-source://")) {
+        val account = app.gyrolet.mpvrx.data.network.StalkerPortal.configuration(applicationContext, source)
+        Result.success(Configuration(p.name, account.endpoint, mac = account.mac, userAgent = account.userAgent, mag = true))
+      } else Result.success(Configuration(p.name, p.xtreamServerUrl ?: source, p.xtreamUsername.orEmpty(), if (p.isXtreamPlaylist) decryptXtreamPassword(p) else "", userAgent = p.userAgent.orEmpty(), hls = if (p.isXtreamPlaylist) xtreamOutput(p.xtreamServerUrl.orEmpty(), p.xtreamUsername.orEmpty()) == "m3u8" else true))
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+  }
+
+  suspend fun accountInformation(id: Int): Result<String> = withContext(Dispatchers.IO) {
+    try {
+      val p = getPlaylistById(id) ?: error("Playlist not found")
+      val text = when {
+        p.isXtreamPlaylist -> xtreamClient.checkAccount(p.xtreamServerUrl!!, p.xtreamUsername!!, decryptXtreamPassword(p)).getOrThrow()
+        p.m3uSourceUrl?.startsWith("mpvrx-stalker-source://") == true -> app.gyrolet.mpvrx.data.network.StalkerPortal.information(applicationContext, p.m3uSourceUrl)
+        else -> "Source: ${p.m3uSourceUrl?.toHttpUrlOrNull()?.host ?: "Local playlist"}\nAccount status, expiry and connection limits: Not provided by this playlist"
+      }
+      Result.success(text + "\nChecked: " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date()))
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+  }
+
+  suspend fun saveConfiguration(id: Int, config: Configuration): Result<Unit> = withContext(Dispatchers.IO) {
+    var pendingPortal: String? = null
+    try {
+      require(config.name.isNotBlank()) { "Playlist name is required" }
+      val previous = getPlaylistById(id) ?: error("Playlist not found")
+      var updated = previous.copy(name = config.name.trim())
+      val parsed: M3UParseResult.Success? = when {
+        previous.isXtreamPlaylist -> {
+          val catalog = xtreamClient.loadCatalog(config.url.trim(), config.username, config.password, if (config.hls) "m3u8" else "ts").getOrThrow()
+          val duplicate = playlistDao.getXtreamPlaylistByIdentity(catalog.serverUrl, config.username)
+          require(duplicate == null || duplicate.id == id) { "This account is already in another playlist" }
+          updated = updated.copy(xtreamServerUrl = catalog.serverUrl, xtreamUsername = config.username, xtreamEncryptedPassword = encryptXtreamPassword(config.password))
+          secureXtreamPlaylist(catalog.playlist, previous.xtreamAccountKey!!, config.username, config.password)
+        }
+        config.mag -> {
+          val result = app.gyrolet.mpvrx.data.network.StalkerPortal.create(applicationContext, config.name, config.url, config.mac.trim(), config.userAgent)
+          pendingPortal = result.first
+          updated = updated.copy(m3uSourceUrl = result.first, userAgent = config.userAgent)
+          result.second
+        }
+        previous.isM3uPlaylist -> {
+          val uri = Uri.parse(config.url.trim())
+          val result = if (uri.scheme == "file" || uri.scheme == "content") M3UParser.parseFromUri(applicationContext, uri) else loadRemotePlaylist(config.url.trim(), config.userAgent.takeIf(String::isNotBlank)).getOrThrow().parseResult
+          updated = updated.copy(m3uSourceUrl = config.url.trim(), userAgent = config.userAgent.takeIf(String::isNotBlank))
+          when (result) { is M3UParseResult.Success -> result; is M3UParseResult.Error -> error(result.message) }
+        }
+        else -> null
+      }
+      remotePlaylistWriteMutex.withLock {
+        require(getPlaylistById(id) == previous) { "Playlist changed during Save. Try again." }
+        if (parsed != null) replaceRemotePlaylist(updated, parsed, config.name.trim(), updated.userAgent) else updatePlaylist(updated)
+      }
+      pendingPortal = null
+      if (config.mag) previous.m3uSourceUrl?.let { app.gyrolet.mpvrx.data.network.StalkerPortal.remove(applicationContext, it) }
+      if (previous.isXtreamPlaylist) applicationContext.getSharedPreferences("custom_iptv", android.content.Context.MODE_PRIVATE).edit().putString(XtreamClient.outputPreferenceKey(updated.xtreamServerUrl!!, config.username), if (config.hls) "m3u8" else "ts").apply()
+      Result.success(Unit)
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+    finally { pendingPortal?.let { app.gyrolet.mpvrx.data.network.StalkerPortal.remove(applicationContext, it) } }
+  }
+
   suspend fun updatePlaylist(playlist: PlaylistEntity) {
     playlistDao.updatePlaylist(playlist.copy(updatedAt = System.currentTimeMillis()))
   }
@@ -963,6 +1028,7 @@ class PlaylistRepository(
       previousItems.values
         .filter { item -> !item.tvgId.isNullOrBlank() }
         .associateBy { item -> item.tvgId }
+    val previousStalkerItems = previousItems.values.filter { it.filePath.startsWith("mpvrx-stalker://") }.associateBy { Uri.parse(it.filePath).lastPathSegment }
     val previousXtreamItems =
       previousItems.values.mapNotNull { item ->
         xtreamItemIdentity(item.filePath)?.let { identity -> identity to item }
@@ -977,6 +1043,7 @@ class PlaylistRepository(
           now = now,
           previousItem =
             previousItems[normalizedPath]
+              ?: (if (normalizedPath.startsWith("mpvrx-stalker://")) previousStalkerItems[Uri.parse(normalizedPath).lastPathSegment] else null)
               ?: xtreamItemIdentity(normalizedPath)?.let(previousXtreamItems::get)
               ?: item.tvgId?.let(previousItemsByTvgId::get),
         )

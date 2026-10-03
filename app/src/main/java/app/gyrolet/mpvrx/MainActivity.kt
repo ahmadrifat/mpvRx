@@ -123,8 +123,14 @@ class MainActivity : AppCompatActivity() {
       PermissionUtils.handleMediaAccessResult(result.resultCode)
     }
 
+  override fun onNewIntent(intent: android.content.Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    app.gyrolet.mpvrx.domain.download.DownloadNavigation.accept(intent)
+  }
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    app.gyrolet.mpvrx.domain.download.DownloadNavigation.accept(intent)
 
     if (DeviceFormFactor.isTelevision(this)) {
       requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
@@ -538,6 +544,12 @@ class MainActivity : AppCompatActivity() {
     val typedBackstack = backstack as NavBackStack<Screen>
 
     val context = LocalContext.current
+    val downloadRequest by app.gyrolet.mpvrx.domain.download.DownloadNavigation.requests.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(downloadRequest) {
+      if (app.gyrolet.mpvrx.domain.download.DownloadNavigation.consume()) {
+        if (typedBackstack.lastOrNull() != app.gyrolet.mpvrx.ui.downloads.DownloadsScreen) typedBackstack.add(app.gyrolet.mpvrx.ui.downloads.DownloadsScreen)
+      }
+    }
     val currentVersion =
       if (BuildConfig.IS_PREVIEW_BUILD) {
         stringResource(R.string.update_beta_build_format, BuildConfig.GIT_COUNT)

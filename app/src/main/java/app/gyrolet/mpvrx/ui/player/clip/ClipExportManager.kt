@@ -51,7 +51,6 @@ data class ClipRequest(
   val startSeconds: Double,
   val endSeconds: Double,
   val crop: ClipCrop? = null,
-  val lossless: Boolean = false,
 )
 
 sealed interface ClipExportState {
@@ -111,6 +110,8 @@ object ClipExportManager {
       }
 
     val appContext = context.applicationContext
+    val clipJobId = ClipJobs.add(appContext, request)
+    ClipExportService.start(appContext)
     lateinit var job: Job
     job = scope.launch(start = CoroutineStart.LAZY) {
       var resolvedSource: ResolvedSource? = null
@@ -119,36 +120,19 @@ object ClipExportManager {
         resolvedSource = resolveSource(appContext, request.item)
         temporaryOutput = createTemporaryOutput(appContext)
 
-        val error =
-          if (request.lossless && request.crop == null) LosslessClipExporter.export(
-            context = appContext,
-            source = resolvedSource.uri,
-            output = temporaryOutput.absolutePath,
-            startSeconds = request.startSeconds,
-            endSeconds = request.endSeconds,
-            headers = request.item.headers,
-            onProgress = { progress -> _state.value = ClipExportState.Exporting(progress.toFloat()) },
-          ) else Media3ClipExporter.export(
-            context = appContext,
-            source = resolvedSource.uri,
-            output = temporaryOutput.absolutePath,
-            startSeconds = request.startSeconds,
-            endSeconds = request.endSeconds,
-            crop = request.crop,
-            cropFrameWidth = cropFrameSize?.first ?: 0,
-            cropFrameHeight = cropFrameSize?.second ?: 0,
-            headers = request.item.headers,
-            onProgress = { progress ->
-              val current = _state.value as? ClipExportState.Exporting
-              _state.value =
-                ClipExportState.Exporting(
-                  progress = progress.toFloat().coerceIn(0f, 1f),
-                  cancelling = current?.cancelling == true,
-                )
-            },
-          )
+        val error = AutomaticClipExporter.export(
+          context = appContext, source = resolvedSource.uri, original = request.item.originalUri,
+          output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
+          crop = request.crop, frameWidth = cropFrameSize?.first ?: 0, frameHeight = cropFrameSize?.second ?: 0,
+          headers = request.item.headers,
+          onProgress = { progress ->
+            _state.value = ClipExportState.Exporting(progress.toFloat())
+            ClipJobs.update(clipJobId, progress = progress.toFloat())
+          }, onStage = { stage -> ClipJobs.update(clipJobId, status = stage) },
+        )
 
         if (error != null) {
+          ClipJobs.update(clipJobId, status = "Failed", error = error)
           _state.value = ClipExportState.Error(error)
           return@launch
         }
@@ -158,12 +142,16 @@ object ClipExportManager {
         }
 
         val displayName = buildDisplayName(request.item)
+        ClipJobs.update(clipJobId, status = "Saving")
         val savedUri = saveToVideoLibrary(appContext, temporaryOutput, displayName)
         temporaryOutput = null
+        ClipJobs.update(clipJobId, status = "Completed", progress = 1f, output = savedUri.toString())
         _state.value = ClipExportState.Success(savedUri, displayName)
       } catch (error: CancellationException) {
+        ClipJobs.update(clipJobId, status = "Cancelled")
         throw error
       } catch (error: Throwable) {
+        ClipJobs.update(clipJobId, status = "Failed", error = error.message ?: "Could not save clip")
         _state.value =
           ClipExportState.Error(
             error.message?.takeIf { it.isNotBlank() } ?: "Unable to save this clip",
@@ -209,6 +197,12 @@ object ClipExportManager {
     context: Context,
     item: PlaybackItem,
   ): ResolvedSource {
+    app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.initialize(context)
+    app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.find(item.originalUri, item.torrentFileIndex)?.takeIf { it.complete }?.let { return ResolvedSource(it.path) }
+    val direct = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.AppDownloadManager>().downloads.value.firstOrNull { it.entity.sourceUrl == item.originalUri && it.isPlayable }
+    if (direct != null) return ResolvedSource(direct.file.absolutePath)
+    val completed = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine>().jobs.value.firstOrNull { it.url == item.originalUri && it.state == app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine.JobState.SUCCESS && it.outputFile?.let(::File)?.isFile == true }
+    if (completed != null) return ResolvedSource(completed.outputFile!!)
     val contentUri =
       when {
         item.originalUri.startsWith("content://", ignoreCase = true) -> item.originalUri

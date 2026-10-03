@@ -22,7 +22,7 @@ fun DownloadCurrentButton() {
   val item = state.currentItem ?: return
   val source = item.originalUri
   val torrents by app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.downloads.collectAsState()
-  val torrent = torrents.firstOrNull { it.source == source && it.index == item.torrentFileIndex }
+  val torrent = app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.find(source, item.torrentFileIndex)
   if (torrent?.complete == true) {
     androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.CircleShape) {
       androidx.compose.material3.Text("Downloaded", style = androidx.compose.material3.MaterialTheme.typography.labelSmall, modifier = androidx.compose.ui.Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
@@ -33,7 +33,7 @@ fun DownloadCurrentButton() {
     icon = Icons.RoundedFilled.Download,
     title = "Download video",
     onClick = {
-      val route = coordinator.enqueue(source, item.title)
+      val route = coordinator.enqueue(source, item.title, item.headers)
       Toast.makeText(context, if (route == LinkDownloadCoordinator.Route.UNSUPPORTED) "This source cannot be downloaded" else "Download queued — see Downloads", Toast.LENGTH_SHORT).show()
     },
   )

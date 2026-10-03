@@ -105,6 +105,7 @@ class YtdlpDownloadService : Service() {
 
     return NotificationCompat
       .Builder(this, CHANNEL_ID)
+      .setContentIntent(DownloadNavigation.pendingIntent(this))
       .setSmallIcon(android.R.drawable.stat_sys_download)
       .setContentTitle(title)
       .setContentText(text)

@@ -86,10 +86,10 @@ class XtreamClient(
   }
 
   suspend fun checkAccount(rawServerUrl: String, username: String, password: String): Result<String> = try {
-    val info = validateAccount(normalizeServerUrl(rawServerUrl), username, password)
+    val info = validateAccount(normalizeServerUrl(rawServerUrl), username, password, requireActive = false)
     val expiry = (info["exp_date"] as? JsonPrimitive)?.content?.toLongOrNull()?.takeIf { it > 0 }
-    val date = expiry?.let { java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it * 1000)) } ?: "Not supplied / unlimited"
-    Result.success("Status: Active\nExpires: $date\nConnections: ${(info["active_cons"] as? JsonPrimitive)?.content ?: "?"} / ${(info["max_connections"] as? JsonPrimitive)?.content ?: "?"}")
+    val date = expiry?.let { java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it * 1000)) } ?: "Not provided"
+    Result.success("Status: ${(info["status"] as? JsonPrimitive)?.content ?: "Not provided"}\nExpires: $date\nConnections: ${(info["active_cons"] as? JsonPrimitive)?.content ?: "?"} / ${(info["max_connections"] as? JsonPrimitive)?.content ?: "?"}")
   } catch (error: CancellationException) { throw error } catch (error: Exception) { Result.failure(error) }
 
   private suspend fun loadApiCatalog(serverUrl: String, username: String, password: String, output: String): M3UParseResult.Success {
@@ -101,11 +101,22 @@ class XtreamClient(
         ?: throw IllegalArgumentException("Xtream channel API did not return a catalog")
     }
     require(channels.size <= 100_000) { "Xtream catalog is too large" }
+    val categories = runCatching {
+      val categoryUrl = endpoint(serverUrl, "player_api.php", username, password).newBuilder().addQueryParameter("action", "get_live_categories").build()
+      httpClient.newCall(Request.Builder().url(categoryUrl).build()).awaitResponse().use { response ->
+        require(response.isSuccessful)
+        (json.parseToJsonElement(readBoundedUtf8(response.body.byteStream(), 4 * 1024 * 1024)) as JsonArray).mapNotNull { element ->
+          val category = element as? JsonObject ?: return@mapNotNull null
+          val id = (category["category_id"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+          id to ((category["category_name"] as? JsonPrimitive)?.content?.trim() ?: "Uncategorized")
+        }.toMap()
+      }
+    }.getOrElse { if (it is CancellationException) throw it; emptyMap() }
     val items = channels.mapNotNull { element ->
       val channel = element as? JsonObject ?: return@mapNotNull null
       val id = (channel["stream_id"] as? JsonPrimitive)?.content?.takeIf { it.all(Char::isDigit) && it.isNotEmpty() } ?: return@mapNotNull null
       val streamUrl = "$serverUrl/".toHttpUrlOrNull()!!.newBuilder().addPathSegment("live").addPathSegment(username).addPathSegment(password).addPathSegment("$id.$output").build().toString()
-      M3UPlaylistItem(url = streamUrl, title = (channel["name"] as? JsonPrimitive)?.content ?: "Channel $id", tvgId = (channel["epg_channel_id"] as? JsonPrimitive)?.content, tvgLogo = (channel["stream_icon"] as? JsonPrimitive)?.content, groupTitle = (channel["category_id"] as? JsonPrimitive)?.content)
+      M3UPlaylistItem(url = streamUrl, title = (channel["name"] as? JsonPrimitive)?.content ?: "Channel $id", tvgId = (channel["epg_channel_id"] as? JsonPrimitive)?.content, tvgLogo = (channel["stream_icon"] as? JsonPrimitive)?.content, groupTitle = categories[(channel["category_id"] as? JsonPrimitive)?.content] ?: "Uncategorized")
     }
     require(items.isNotEmpty()) { "Xtream account has no available live channels" }
     return M3UParseResult.Success("Xtream Live TV", items)
@@ -115,6 +126,7 @@ class XtreamClient(
     serverUrl: String,
     username: String,
     password: String,
+    requireActive: Boolean = true,
   ): JsonObject {
     val request =
       Request
@@ -142,11 +154,11 @@ class XtreamClient(
         throw IllegalArgumentException("Invalid Xtream username or password")
       }
       val status = (userInfo["status"] as? JsonPrimitive)?.content.orEmpty()
-      if (status.isNotBlank() && !status.equals("active", ignoreCase = true)) {
+      if (requireActive && status.isNotBlank() && !status.equals("active", ignoreCase = true)) {
         throw IllegalArgumentException("Xtream account is not active")
       }
       val expiry = (userInfo["exp_date"] as? JsonPrimitive)?.content?.toLongOrNull()
-      require(expiry == null || expiry == 0L || expiry > System.currentTimeMillis() / 1000) { "Xtream account has expired" }
+      require(!requireActive || expiry == null || expiry == 0L || expiry > System.currentTimeMillis() / 1000) { "Xtream account has expired" }
       return userInfo
     }
   }

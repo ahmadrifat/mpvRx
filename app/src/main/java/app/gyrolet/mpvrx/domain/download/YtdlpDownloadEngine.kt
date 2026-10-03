@@ -45,7 +45,7 @@ class YtdlpDownloadEngine(
   private val context: Context,
   private val preferences: YtdlPreferences,
 ) {
-  enum class JobState { QUEUED, RUNNING, SUCCESS, FAILED, CANCELLED }
+  enum class JobState { QUEUED, RUNNING, SUCCESS, FAILED, CANCELLED, PAUSED }
 
   @Serializable
   data class Job(
@@ -62,6 +62,7 @@ class YtdlpDownloadEngine(
     val error: String? = null,
     val outputFile: String? = null,
     val artifactFiles: Set<String> = emptySet(),
+    val headers: Map<String, String> = emptyMap(),
   ) {
     val isActive: Boolean get() = state == JobState.QUEUED || state == JobState.RUNNING
   }
@@ -97,6 +98,7 @@ class YtdlpDownloadEngine(
 
   @Volatile
   private var cancelRequested = false
+  @Volatile private var pauseRequested = false
 
   fun enqueue(
     url: String,
@@ -105,6 +107,7 @@ class YtdlpDownloadEngine(
     formatSelector: String? = null,
     mergeSeparateStreams: Boolean = false,
     posterUrl: String? = null,
+    headers: Map<String, String> = emptyMap(),
   ): Int {
     val id = nextId.getAndIncrement()
     if (!directory.exists()) directory.mkdirs()
@@ -119,19 +122,30 @@ class YtdlpDownloadEngine(
           formatSelector = formatSelector?.trim()?.takeIf(String::isNotBlank),
           mergeSeparateStreams = mergeSeparateStreams,
           posterUrl = posterUrl,
+          headers = headers,
         )
     }
     YtdlpDownloadService.start(context)
     return id
   }
 
+  fun pause(id: Int) {
+    if (activeJobId == id) { pauseRequested = true; cancelRequested = true; activeProcess?.destroyForcibly() }
+    else updateJob(id) { if (it.state == JobState.QUEUED) it.copy(state = JobState.PAUSED) else it }
+  }
+  fun resume(id: Int) {
+    if (activeJobId == id) return
+    updateJob(id) { if (it.state == JobState.PAUSED) it.copy(state = JobState.QUEUED, error = null) else it }
+    YtdlpDownloadService.start(context)
+  }
   fun cancel(id: Int) {
     _jobs.update { current ->
       current.map { job ->
-        if (job.id == id && job.state == JobState.QUEUED) job.copy(state = JobState.CANCELLED) else job
+        if (job.id == id && job.state in setOf(JobState.QUEUED, JobState.PAUSED)) job.copy(state = JobState.CANCELLED) else job
       }
     }
     if (activeJobId == id) {
+      pauseRequested = false
       cancelRequested = true
       activeProcess?.destroyForcibly()
     }
@@ -179,6 +193,7 @@ class YtdlpDownloadEngine(
   ) {
     val queuedJob = currentJob(id) ?: return
     cancelRequested = false
+    pauseRequested = false
     activeJobId = id
 
     try {
@@ -197,7 +212,7 @@ class YtdlpDownloadEngine(
     val job = currentJob(id)
     if (cancelRequested || job == null) {
       activeJobId = -1
-      updateJob(id) { it.copy(state = JobState.CANCELLED, detail = "") }
+      updateJob(id) { it.copy(state = if (pauseRequested) JobState.PAUSED else JobState.CANCELLED, detail = "") }
       currentJob(id)?.let(onJobUpdate)
       return
     }
@@ -219,7 +234,7 @@ class YtdlpDownloadEngine(
       }
     if (cancelRequested || currentJob(id) == null) {
       activeJobId = -1
-      updateJob(id) { it.copy(state = JobState.CANCELLED, detail = "") }
+      updateJob(id) { it.copy(state = if (pauseRequested) JobState.PAUSED else JobState.CANCELLED, detail = "") }
       currentJob(id)?.let(onJobUpdate)
       return
     }
@@ -250,6 +265,7 @@ class YtdlpDownloadEngine(
         outputDirectory = if (job.mergeSeparateStreams) temporaryDirectory.absolutePath else job.directory,
         temporaryDirectory = temporaryDirectory.absolutePath,
         formatSelector = job.formatSelector,
+        headers = job.headers,
       )
     val observedArtifacts = linkedSetOf<String>()
     val errorOutput = ArrayDeque<String>()
@@ -297,7 +313,7 @@ class YtdlpDownloadEngine(
           cancelRequested ->
             updateJob(id) {
               it.copy(
-                state = JobState.CANCELLED,
+                state = if (pauseRequested) JobState.PAUSED else JobState.CANCELLED,
                 detail = "",
                 artifactFiles = it.artifactFiles + observedArtifacts,
               )
@@ -366,7 +382,7 @@ class YtdlpDownloadEngine(
         Log.e(TAG, "yt-dlp download failed", error)
         updateJob(id) {
           it.copy(
-            state = if (cancelRequested) JobState.CANCELLED else JobState.FAILED,
+            state = if (pauseRequested) JobState.PAUSED else if (cancelRequested) JobState.CANCELLED else JobState.FAILED,
             error = if (cancelRequested) null else error.message ?: "Unknown error",
             artifactFiles = it.artifactFiles + observedArtifacts,
           )
@@ -375,16 +391,20 @@ class YtdlpDownloadEngine(
     currentJob(id)?.let(onJobUpdate)
   }
 
-  private fun buildCommand(
+  internal fun buildCommand(
     url: String,
     outputTemplate: String,
     outputDirectory: String,
     temporaryDirectory: String,
     formatSelector: String?,
+    headers: Map<String, String> = emptyMap(),
   ): List<String> =
     buildList {
       add(YtdlpManager.getExecutablePath(context))
       add(File(YtdlpManager.getYtdlDir(context), "yt-dlp").absolutePath)
+      add("--ffmpeg-location")
+      add(app.gyrolet.mpvrx.ui.player.clip.FfmpegRuntime.executable(context))
+      headers.forEach { (key, value) -> add("--add-headers"); add("$key:$value") }
       add("--ignore-config")
       add("--no-playlist")
       add("--newline")
@@ -449,7 +469,54 @@ class YtdlpDownloadEngine(
       add(url)
     }
 
-  private fun startProcess(command: List<String>): Process = YtdlpManager.startPythonProcess(command, context)
+  private fun startProcess(command: List<String>): Process {
+    app.gyrolet.mpvrx.ui.player.clip.FfmpegRuntime.libraries(context)
+    return YtdlpManager.startPythonProcess(command, context)
+  }
+
+  internal data class ClipStreams(val video: String, val audio: String?, val headers: Map<String, String>)
+  @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+  internal suspend fun resolveForClip(url: String): ClipStreams = withContext(Dispatchers.IO) {
+    require(YtdlpManager.ensureRuntimeInstalled(context)) { "Could not prepare yt-dlp" }
+    val base = buildCommand(url, "source.%(ext)s", context.cacheDir.absolutePath, context.cacheDir.absolutePath, "bestvideo+bestaudio/best").toMutableList()
+    val separator = base.indexOf("--")
+    base.addAll(separator, listOf("--skip-download", "--dump-single-json", "--no-progress"))
+    val process = startProcess(base)
+    val cancellation = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { if (it != null) process.destroyForcibly() }
+    try {
+      var data: org.json.JSONObject? = null
+      process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line -> if (line.startsWith("{")) data = runCatching { org.json.JSONObject(line) }.getOrNull() } }
+      require(process.waitFor() == 0 && data != null) { "Could not resolve the video for clipping" }
+      val root = data!!
+      val formats = root.optJSONArray("requested_formats")
+      val all = formats?.let { (0 until it.length()).map(it::getJSONObject) }.orEmpty()
+      val video = all.firstOrNull { it.optString("vcodec") != "none" } ?: root
+      val audio = all.firstOrNull { it.optString("vcodec") == "none" && it.optString("acodec") != "none" }
+      val h = video.optJSONObject("http_headers") ?: root.optJSONObject("http_headers") ?: org.json.JSONObject()
+      ClipStreams(video.getString("url"), audio?.getString("url"), h.keys().asSequence().associateWith { h.getString(it) })
+    } finally { cancellation?.dispose(); if (process.isAlive) process.destroyForcibly() }
+  }
+
+  @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+  internal suspend fun acquireForClip(url: String, progress: (Double) -> Unit): File = withContext(Dispatchers.IO) {
+    require(YtdlpManager.ensureRuntimeInstalled(context)) { "Could not prepare yt-dlp" }
+    val directory = File(context.cacheDir, "clip-acquire-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+    val command = buildCommand(url, "source.%(ext)s", directory.absolutePath, directory.absolutePath, "bestvideo+bestaudio/best")
+    val process = startProcess(command)
+    val cancellation = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause -> if (cause != null) process.destroyForcibly() }
+    var success = false
+    try {
+      process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line -> parseProgressLine(line)?.let { progress(it.first.toDouble()) } } }
+      require(process.waitFor() == 0) { "Could not download the source for clipping" }
+      val file = directory.listFiles().orEmpty().filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") }.maxByOrNull(File::length) ?: error("No downloaded video")
+      success = true
+      file
+    } finally {
+      cancellation?.dispose()
+      if (process.isAlive) process.destroyForcibly()
+      if (!success) directory.deleteRecursively()
+    }
+  }
 
   private fun findNewestOutput(job: Job): String? {
     return File(job.directory)

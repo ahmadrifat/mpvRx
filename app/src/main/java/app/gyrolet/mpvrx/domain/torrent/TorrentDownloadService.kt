@@ -21,7 +21,7 @@ class TorrentDownloadService : Service() {
     super.onCreate()
     val manager = getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(NotificationChannel("torrent_downloads", "Torrent downloads", NotificationManager.IMPORTANCE_LOW))
-    val notification = NotificationCompat.Builder(this, "torrent_downloads").setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle("Keeping torrent videos for offline viewing").setOngoing(true).build()
+    val notification = NotificationCompat.Builder(this, "torrent_downloads").setContentIntent(app.gyrolet.mpvrx.domain.download.DownloadNavigation.pendingIntent(this@TorrentDownloadService)).setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle("Keeping torrent videos for offline viewing").setOngoing(true).build()
     ServiceCompat.startForeground(this, 4201, notification, if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0)
     scope.launch {
       OfflineTorrents.downloads.collect { downloads ->
@@ -29,7 +29,7 @@ class TorrentDownloadService : Service() {
         if (active.isEmpty()) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
         else {
           val current = active.first()
-          manager.notify(4201, NotificationCompat.Builder(this@TorrentDownloadService, "torrent_downloads").setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle(current.title).setContentText("Downloading for offline viewing (${active.size} active)").setProgress(100, (current.progress * 100).toInt(), false).setOngoing(true).setOnlyAlertOnce(true).build())
+          manager.notify(4201, NotificationCompat.Builder(this@TorrentDownloadService, "torrent_downloads").setContentIntent(app.gyrolet.mpvrx.domain.download.DownloadNavigation.pendingIntent(this@TorrentDownloadService)).setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle(current.title).setContentText("Downloading for offline viewing (${active.size} active)").setProgress(100, (current.progress * 100).toInt(), false).setOngoing(true).setOnlyAlertOnce(true).build())
         }
       }
     }

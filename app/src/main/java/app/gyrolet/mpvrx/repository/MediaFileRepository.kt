@@ -184,7 +184,7 @@ object MediaFileRepository : KoinComponent {
     withContext(Dispatchers.IO) {
       val aggregates = linkedMapOf<String, AudioFolderAggregate>()
       val publisher =
-        ProgressiveResultsPublisher(onSnapshot) {
+        ProgressiveResultsPublisher(onSnapshot, snapshot = {
           aggregates.values.map { agg ->
             VideoFolder(
               bucketId = agg.path,
@@ -196,7 +196,7 @@ object MediaFileRepository : KoinComponent {
               lastModified = agg.lastModified,
             )
           }
-        }
+        })
       try {
         val projection =
           arrayOf(

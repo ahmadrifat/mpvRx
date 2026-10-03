@@ -205,6 +205,11 @@ class TorrentStreamingEngine(
 
   suspend fun startStream(request: TorrentStreamRequest): TorrentStreamResult =
     withContext(Dispatchers.IO) {
+      OfflineTorrents.initialize(appContext)
+      val saved = OfflineTorrents.find(request.source, request.fileIndex)
+      if (saved?.complete == true) {
+        return@withContext TorrentStreamResult(android.net.Uri.fromFile(java.io.File(saved.path)).toString(), TorrentFileItem(saved.index, java.io.File(saved.path).relativeTo(java.io.File(saved.directory)).path, saved.title, saved.size, "video/*"), saved.source, saved.id.substringBefore('-'), saved.title, listOf(TorrentFileItem(saved.index, java.io.File(saved.path).relativeTo(java.io.File(saved.directory)).path, saved.title, saved.size, "video/*")))
+      }
       val startGeneration = generation.incrementAndGet()
       lifecycleMutex.withLock {
         check(!closed) { "Torrent streaming engine is shut down" }

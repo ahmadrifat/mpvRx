@@ -615,16 +615,16 @@ private fun SelectionTopBar(
         }
       }
 
-      // Rename icon
-      if (onRename != null) {
+      // Info icon
+      if (onInfo != null) {
         IconButton(
-          onClick = onRename,
+          onClick = onInfo,
           enabled = isSingleSelection,
           modifier = Modifier.padding(horizontal = 1.dp).browserTopBarFocus(enabled = isSingleSelection),
         ) {
           Icon(
-            Icons.RoundedFilled.DriveFileRenameOutline,
-            contentDescription = stringResource(R.string.rename),
+            Icons.RoundedFilled.Info,
+            contentDescription = stringResource(R.string.info),
             modifier = Modifier.size(24.dp),
             tint =
               if (isSingleSelection) {
@@ -636,16 +636,16 @@ private fun SelectionTopBar(
         }
       }
 
-      // Info icon
-      if (onInfo != null) {
+      // Rename icon
+      if (onRename != null) {
         IconButton(
-          onClick = onInfo,
+          onClick = onRename,
           enabled = isSingleSelection,
           modifier = Modifier.padding(horizontal = 1.dp).browserTopBarFocus(enabled = isSingleSelection),
         ) {
           Icon(
-            Icons.RoundedFilled.Info,
-            contentDescription = stringResource(R.string.info),
+            Icons.RoundedFilled.DriveFileRenameOutline,
+            contentDescription = stringResource(R.string.rename),
             modifier = Modifier.size(24.dp),
             tint =
               if (isSingleSelection) {

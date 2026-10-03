@@ -25,6 +25,14 @@ object StalkerPortal {
   data class Session(val account: Account, val token: String)
   data class Stream(val url: String, val headers: Map<String, String>)
 
+  fun configuration(context: Context, source: String): Account = load(context, Uri.parse(source).host ?: error("Portal configuration missing")).first
+  suspend fun information(context: Context, source: String): String {
+    val account = configuration(context, source)
+    val session = authenticate(account)
+    val details = try { request(account, "account_info", "get_main_info", session.token) as? JSONObject } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+    fun supplied(vararg names: String): String = names.firstNotNullOfOrNull { details?.optString(it)?.takeIf { v -> v.isNotBlank() && v != "null" } } ?: "Not provided"
+    return "Portal access: Authenticated\nExpiry: ${supplied("end_date", "expire_date")}\nActive connections: ${supplied("active_cons")}\nConnection limit: ${supplied("max_connections")}"
+  }
   fun isReference(source: String) = source.startsWith("mpvrx-stalker://")
   private fun file(context: Context, id: String): File {
     require(id.matches(Regex("[a-f0-9-]{36}"))) { "Invalid portal reference" }
@@ -70,7 +78,9 @@ object StalkerPortal {
   private suspend fun authenticate(account: Account): Session {
     val handshake = request(account, "stb", "handshake", params = mapOf("token" to "")) as? JSONObject
     val token = handshake?.optString("token")?.takeIf { it.isNotBlank() } ?: error("Portal rejected this MAC address")
-    request(account, "stb", "get_profile", token, mapOf("stb_type" to "MAG254", "client_type" to "STB", "hd" to "1", "video_out" to "hdmi", "ver" to "ImageDescription: 0.2.18-r23-254; PORTAL version: 5.6.1; API Version: JS API version: 343; STB API version: 146; Player Engine version: 0x58c"))
+    val profile = request(account, "stb", "get_profile", token, mapOf("stb_type" to "MAG254", "client_type" to "STB", "hd" to "1", "video_out" to "hdmi", "ver" to "ImageDescription: 0.2.18-r23-254; PORTAL version: 5.6.1; API Version: JS API version: 343; STB API version: 146; Player Engine version: 0x58c"))
+    require(profile is JSONObject) { "Portal rejected this MAC address" }
+    require(profile.optInt("blocked", 0) != 1 && !profile.optBoolean("blocked", false)) { "This MAG account is blocked" }
     return Session(account, token)
   }
   suspend fun create(context: Context, name: String, portal: String, mac: String, userAgent: String): Pair<String, M3UParseResult.Success> = withContext(Dispatchers.IO) {
@@ -86,7 +96,16 @@ object StalkerPortal {
     for (endpoint in endpoints) {
       val account = Account(id, name.trim(), endpoint, mac.uppercase(), userAgent.trim().ifEmpty { DEFAULT_USER_AGENT })
       try {
-        val catalog = catalog(context, authenticate(account))
+        val session = authenticate(account)
+        val info = try { request(account, "account_info", "get_main_info", session.token) as? JSONObject } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+        val expiryText = info?.optString("end_date")?.takeIf { it.isNotBlank() } ?: info?.optString("expire_date")
+        val expiry = expiryText?.toLongOrNull()?.takeIf { it > 0 }?.times(1000) ?: expiryText?.let { text ->
+          listOf("yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd", "dd.MM.yyyy", "MMM d, yyyy").firstNotNullOfOrNull { pattern ->
+            runCatching { java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply { isLenient = false }.parse(text)?.time }.getOrNull()
+          }
+        }
+        require(expiry == null || expiry > System.currentTimeMillis()) { "This MAG account has expired" }
+        val catalog = catalog(context, session)
         return@withContext "mpvrx-stalker-source://$id" to catalog
       } catch (error: kotlinx.coroutines.CancellationException) { throw error } catch (error: Exception) { failure = error }
     }

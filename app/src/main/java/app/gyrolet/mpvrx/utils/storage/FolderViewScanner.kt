@@ -137,7 +137,7 @@ object FolderViewScanner {
       // Build fresh data
       val allFolders = mutableMapOf<String, FolderData>()
       val noMediaPathFilter = NoMediaPathFilter(options)
-      val publisher = ProgressiveResultsPublisher(onSnapshot) {
+      val publisher = ProgressiveResultsPublisher(onSnapshot, snapshot = {
         allFolders.values.map { data ->
           VideoFolder(
             bucketId = data.path,
@@ -149,7 +149,7 @@ object FolderViewScanner {
             lastModified = data.lastModified,
           )
         }
-      }
+      })
 
       // Per-stage timings: with a large library the MediaStore pass and the filesystem walk
       // dominate, and they scale very differently. Logged so a slow launch can be attributed

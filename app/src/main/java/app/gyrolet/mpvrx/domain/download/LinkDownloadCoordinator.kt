@@ -41,6 +41,7 @@ class LinkDownloadCoordinator(
   fun enqueue(
     url: String,
     title: String?,
+    headers: Map<String, String> = emptyMap(),
   ): Route {
     val route = routeFor(url)
     val directory = downloadManager.locations.linksDir()
@@ -53,6 +54,7 @@ class LinkDownloadCoordinator(
           url = url,
           directory = directory,
           fileName = fileName,
+          headers = headers,
           meta =
             DownloadMetadata(
               source = DownloadSources.LINK,
@@ -69,6 +71,7 @@ class LinkDownloadCoordinator(
           directory = directory,
           formatSelector = YOUTUBE_DOWNLOAD_FORMAT.takeIf { isYouTube },
           mergeSeparateStreams = isYouTube,
+          headers = headers,
         )
       }
       Route.UNSUPPORTED -> {}

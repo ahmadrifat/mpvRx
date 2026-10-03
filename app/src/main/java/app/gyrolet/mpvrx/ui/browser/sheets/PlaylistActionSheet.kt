@@ -169,9 +169,6 @@ fun PlaylistActionSheet(
       }
 
       // Action cards
-      Card(onClick = { showStalkerDialog = true }, modifier = Modifier.fillMaxWidth()) {
-        Text("Add MAG / Stalker portal", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge)
-      }
       Card(
         onClick = {
           showCreateDialog = true
@@ -297,6 +294,15 @@ fun PlaylistActionSheet(
         }
       }
 
+      Card(onClick = { showStalkerDialog = true }, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.RoundedFilled.Tv, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+          Column(Modifier.weight(1f)) {
+            Text("Add MAG / Stalker portal", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text("Import channels using your portal and MAC address", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        }
+      }
       Card(
         onClick = { folderPickerLauncher.launch(null) },
         modifier = Modifier.fillMaxWidth(),

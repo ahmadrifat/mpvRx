@@ -774,6 +774,7 @@ fun RenderPlayerButton(
       )
     }
 
+    PlayerButton.DOWNLOAD -> DownloadCurrentButton()
     PlayerButton.MORE_OPTIONS -> {
       ControlsButton(
         Icons.RoundedFilled.MoreVert,

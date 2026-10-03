@@ -21,7 +21,7 @@ class XtreamClientTest {
   @Before fun setup() {
     server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/") { exchange ->
-      val body = if (exchange.requestURI.path.endsWith("get.php")) playlist else if (exchange.requestURI.rawQuery.orEmpty().contains("action=get_live_streams")) channels else account
+      val body = if (exchange.requestURI.path.endsWith("get.php")) playlist else if (exchange.requestURI.rawQuery.orEmpty().contains("action=get_live_categories")) """[{"category_id":"5","category_name":"News channels"}]""" else if (exchange.requestURI.rawQuery.orEmpty().contains("action=get_live_streams")) channels else account
       val bytes = body.toByteArray()
       exchange.sendResponseHeaders(200, bytes.size.toLong())
       exchange.responseBody.use { it.write(bytes) }
@@ -48,7 +48,17 @@ class XtreamClientTest {
     val result = client.loadCatalog(base, "user", "password").getOrThrow()
     assertEquals(1, result.playlist.items.size)
     assertEquals("News", result.playlist.items.single().title)
+    assertEquals("News channels", result.playlist.items.single().groupTitle)
     assertTrue(result.playlist.items.single().url.endsWith("/live/user/password/123.m3u8"))
+  }
+  @Test fun expiredAccountDetailsRemainReadable() = runBlocking {
+    account = """{"user_info":{"auth":1,"status":"Expired","exp_date":1,"active_cons":0,"max_connections":2}}"""
+    assertTrue(client.checkAccount(base, "user", "password").getOrThrow().contains("Status: Expired"))
+    assertTrue(client.loadCatalog(base, "user", "password").isFailure)
+  }
+  @Test fun alternativeM3uGroupsAreRead() {
+    val parsed = app.gyrolet.mpvrx.utils.media.M3UParser.parseContent("#EXTM3U\n#EXTINF:-1,One\n#EXTGRP: News \nhttp://example.com/1.ts\n") as app.gyrolet.mpvrx.utils.media.M3UParseResult.Success
+    assertEquals("News", parsed.items.single().groupTitle)
   }
   @Test fun emptyFallbackCatalogFailsClearly() = runBlocking {
     channels = "[]"

@@ -154,6 +154,7 @@ internal object Media3ClipExporter {
       }
 
     return Transformer.Builder(context)
+      .experimentalSetTrimOptimizationEnabled(true)
       .setAssetLoaderFactory(assetLoaderFactory)
       .setVideoMimeType(MimeTypes.VIDEO_H264)
       .setAudioMimeType(MimeTypes.AUDIO_AAC)

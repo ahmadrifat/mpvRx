@@ -157,6 +157,7 @@ object PlaylistScreen : Screen {
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
     val isRefreshing = remember { mutableStateOf(false) }
+    var showPlaylistInformation by remember { mutableStateOf(false) }
     var showRenameDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showSortDialog by rememberSaveable { mutableStateOf(false) }
@@ -262,6 +263,7 @@ object PlaylistScreen : Screen {
             onSettingsClick = {
               backStack.navigateTo(app.gyrolet.mpvrx.ui.preferences.PreferencesScreen)
             },
+            onInfoClick = if (selectionManager.isSingleSelection && selectionManager.getSelectedItems().firstOrNull()?.playlist?.isM3uPlaylist == true) ({ showPlaylistInformation = true }) else null,
             onRenameClick =
               if (selectionManager.isSingleSelection && !hasProtectedSelection) {
                 { showRenameDialog = true }
@@ -371,64 +373,15 @@ object PlaylistScreen : Screen {
     )
 
     if (showRenameDialog && selectionManager.isSingleSelection) {
-      val selectedPlaylist = selectionManager.getSelectedItems().firstOrNull()
-      if (selectedPlaylist != null) {
-        var playlistName by remember { mutableStateOf(selectedPlaylist.playlist.name) }
-        androidx.compose.material3.AlertDialog(
-          onDismissRequest = { showRenameDialog = false },
-          title = {
-            Text(
-              androidx.compose.ui.res
-                .stringResource(app.gyrolet.mpvrx.R.string.ui_rename_playlist),
-            )
-          },
-          text = {
-            androidx.compose.material3.OutlinedTextField(
-              value = playlistName,
-              onValueChange = { playlistName = it },
-              label = {
-                Text(
-                  androidx.compose.ui.res
-                    .stringResource(app.gyrolet.mpvrx.R.string.ui_playlist_name),
-                )
-              },
-              singleLine = true,
-              modifier = Modifier.fillMaxWidth(),
-            )
-          },
-          confirmButton = {
-            androidx.compose.material3.TextButton(
-              onClick = {
-                if (playlistName.isNotBlank()) {
-                  scope.launch {
-                    viewModel.updatePlaylist(selectedPlaylist.playlist.copy(name = playlistName.trim()))
-                    showRenameDialog = false
-                    selectionManager.clear()
-                  }
-                }
-              },
-              enabled = playlistName.isNotBlank(),
-            ) {
-              Text(
-                androidx.compose.ui.res
-                  .stringResource(app.gyrolet.mpvrx.R.string.rename),
-              )
-            }
-          },
-          dismissButton = {
-            androidx.compose.material3.TextButton(
-              onClick = { showRenameDialog = false },
-            ) {
-              Text(
-                androidx.compose.ui.res
-                  .stringResource(app.gyrolet.mpvrx.R.string.generic_cancel),
-              )
-            }
-          },
-        )
+      selectionManager.getSelectedItems().firstOrNull()?.let { selected ->
+        app.gyrolet.mpvrx.ui.browser.dialogs.EditPlaylistDialog(selected.playlist, onDismiss = { showRenameDialog = false }, onSaved = { showRenameDialog = false; selectionManager.clear() })
       }
     }
-
+    if (showPlaylistInformation && selectionManager.isSingleSelection) {
+      selectionManager.getSelectedItems().firstOrNull()?.let { selected ->
+        app.gyrolet.mpvrx.ui.browser.dialogs.PlaylistInformationDialog(selected.playlist, onDismiss = { showPlaylistInformation = false })
+      }
+    }
     if (showDeleteDialog) {
       DeleteConfirmationDialog(
         isOpen = true,

@@ -370,7 +370,14 @@ class NetworkStreamingViewModel(
   }
 
   fun deleteStreamEntry(stableKey: String) {
-    viewModelScope.launch { streamEntryRepository.delete(stableKey) }
+    viewModelScope.launch {
+      val torrent = torrentFiles.value.firstOrNull { it.stableKey == stableKey }
+      if (torrent?.infoHash != null && !app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.deleteByHash(torrent.infoHash, torrent.fileIndex)) {
+        android.widget.Toast.makeText(getApplication<Application>(), "Close torrent playback before deleting its files", android.widget.Toast.LENGTH_LONG).show()
+        return@launch
+      }
+      streamEntryRepository.delete(stableKey)
+    }
   }
 
   fun deleteTorrentGroup(group: TorrentStreamGroup) {
@@ -381,6 +388,10 @@ class NetworkStreamingViewModel(
     viewModelScope.launch {
       val infoHash = group.infoHash
       if (infoHash != null) {
+        if (!app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.deleteByHash(infoHash)) {
+          android.widget.Toast.makeText(getApplication<Application>(), "Close torrent playback before deleting its files", android.widget.Toast.LENGTH_LONG).show()
+          return@launch
+        }
         streamEntryRepository.deleteTorrentGroup(infoHash)
       } else {
         group.files.forEach { streamEntryRepository.delete(it.stableKey) }

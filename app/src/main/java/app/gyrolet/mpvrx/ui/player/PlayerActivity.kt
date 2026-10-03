@@ -5798,7 +5798,7 @@ private suspend fun restorePlaybackPosition(state: PlaybackStateEntity?, loadGen
             resolvedMediaIdentifier = PlaybackIdentity.forTorrent(result.infoHash, result.selectedFile.index)
 
             try {
-              networkStreamEntryRepository.replaceTorrentFiles(
+              if (!result.localUrl.startsWith("file://")) networkStreamEntryRepository.replaceTorrentFiles(
                 canonicalSourceUri = result.source,
                 infoHash = result.infoHash,
                 files =

@@ -84,7 +84,7 @@ fun AddXtreamPlaylistDialog(
       parsedServerUrl.query == null &&
       parsedServerUrl.fragment == null
   val showServerUrlError = !isServerUrlValid && (submitted || serverUrl.isNotBlank())
-  val canSubmit = isServerUrlValid && username.isNotBlank() && password.isNotBlank() && !isLoading
+  val canSubmit = serverUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank() && !isLoading
 
   val submit = {
     submitted = true
@@ -101,7 +101,7 @@ fun AddXtreamPlaylistDialog(
             password = ""
             onImported()
           }.onFailure { error ->
-            errorMessage = error.message ?: context.getString(R.string.generic_unknown_error)
+            android.widget.Toast.makeText(context, app.gyrolet.mpvrx.ui.browser.dialogs.playlistError(error, password), Toast.LENGTH_LONG).show()
           }
         isLoading = false
       }
@@ -136,7 +136,7 @@ fun AddXtreamPlaylistDialog(
           label = { Text(stringResource(R.string.playlist_xtream_server_url)) },
           placeholder = { Text(stringResource(R.string.playlist_xtream_server_placeholder)) },
           singleLine = true,
-          isError = showServerUrlError,
+
           enabled = !isLoading,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
           modifier = Modifier.fillMaxWidth(),
@@ -181,25 +181,6 @@ fun AddXtreamPlaylistDialog(
           modifier = Modifier.fillMaxWidth(),
         )
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Text("Prefer HLS streams", modifier = Modifier.weight(1f))
-          androidx.compose.material3.Switch(checked = preferHls, onCheckedChange = { preferHls = it }, enabled = !isLoading)
-        }
-        if (showServerUrlError) {
-          Text(
-            text = stringResource(R.string.playlist_xtream_url_error),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-          )
-        }
-        errorMessage?.let { message ->
-          Text(
-            text = stringResource(R.string.playlist_xtream_import_error, message),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-          )
-        }
-
         if (isLoading) {
           Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(modifier = Modifier.size(32.dp))
@@ -211,27 +192,15 @@ fun AddXtreamPlaylistDialog(
           horizontalArrangement = Arrangement.End,
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          TextButton(enabled = canSubmit, onClick = {
-            isLoading = true
-            coroutineScope.launch {
-              client.checkAccount(serverUrl.trim(), username, password)
-                .onSuccess { accountDetails = it; errorMessage = null }
-                .onFailure { errorMessage = it.message }
-              isLoading = false
-            }
-          }) { Text("Check account") }
           TextButton(onClick = onDismiss, enabled = !isLoading) {
             Text(stringResource(R.string.generic_cancel))
           }
           Spacer(modifier = Modifier.width(8.dp))
           Button(onClick = submit, enabled = canSubmit) {
-            Text(stringResource(R.string.playlist_xtream_connect))
+            Text("Import")
           }
         }
       }
     }
-  }
-  accountDetails?.let { details ->
-    androidx.compose.material3.AlertDialog(onDismissRequest = { accountDetails = null }, title = { Text("Xtream account") }, text = { Text(details) }, confirmButton = { TextButton(onClick = { accountDetails = null }) { Text("OK") } })
   }
 }

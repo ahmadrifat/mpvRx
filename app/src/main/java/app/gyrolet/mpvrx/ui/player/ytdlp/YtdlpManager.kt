@@ -850,7 +850,8 @@ object YtdlpManager {
     env["XDG_CACHE_HOME"] = context.cacheDir.absolutePath
     env["TMPDIR"] = context.cacheDir.absolutePath
     env["SSL_CERT_FILE"] = File(context.filesDir, "cacert.pem").absolutePath
-    env["LD_LIBRARY_PATH"] = nativeLibDir
+    val ffmpegLibs = runCatching { app.gyrolet.mpvrx.ui.player.clip.FfmpegRuntime.libraries(context).absolutePath }.getOrNull()
+    env["LD_LIBRARY_PATH"] = listOfNotNull(nativeLibDir, ffmpegLibs).joinToString(":")
     return processBuilder.start()
   }
 }

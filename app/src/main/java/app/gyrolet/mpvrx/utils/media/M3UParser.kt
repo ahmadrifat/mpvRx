@@ -294,6 +294,7 @@ object M3UParser {
       when {
         line.startsWith("#EXT-X-", ignoreCase = true) -> return error(HLS_ERROR)
         line.startsWith("#EXTM3U", ignoreCase = true) -> Unit
+        line.startsWith("#EXTGRP:", ignoreCase = true) -> pending.groupTitle = line.substringAfter(':').trim().ifBlank { null }
         line.startsWith(EXTINF_PREFIX, ignoreCase = true) -> {
           pending.clearExtInf()
           parseExtInf(line.substring(EXTINF_PREFIX.length).trim(), pending)
@@ -359,7 +360,7 @@ object M3UParser {
         "tvg-id" -> pending.tvgId = value
         "tvg-name" -> pending.tvgName = value
         "tvg-logo" -> pending.tvgLogo = value
-        "group-title" -> pending.groupTitle = value
+        "group-title" -> pending.groupTitle = value.trim().ifBlank { null }
       }
     }
   }
