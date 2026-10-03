@@ -1,10 +1,10 @@
-# mpvRx 2.7.2-cs.6
+# mpvRx 2.7.2.6
 
-Based on upstream 594bfc67, with the previous custom source checkpoint preserved in Git.
+Based on upstream 0e79b470, with the previous custom source checkpoint preserved in Git.
 
 ## Installation
 
-Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.cs. Version code: 60. The package ID changed from .custom to .cs at the user's request. This release installs separately from the earlier custom app and does not automatically transfer its settings/playlists. It coexists with both that app and the author's original app. Subsequent .cs releases with the same signing key can update this installation. An APK with the original package but a different signing certificate cannot update the author's installation.
+Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.cs. Version code: 70. The package ID changed from .custom to .cs at the user's request. This release installs separately from the earlier custom app and does not automatically transfer its settings/playlists. It coexists with both that app and the author's original app. Subsequent .cs releases with the same signing key can update this installation. An APK with the original package but a different signing certificate cannot update the author's installation.
 
 ## Changes
 
@@ -42,11 +42,11 @@ Build with the repository Gradle wrapper, a compatible JDK, Android SDK and conf
 
 Universal output: app/build/outputs/apk/standard/custom/app-standard-universal-custom.apk.
 
-Keep feature changes in separate commits. Fetch and merge origin/master periodically, resolve conflicts, run checks and rebuild with the same signing key. Source bundles contain the final source; the local Git repository retains the checkpoint and merge history.
+Keep feature changes in separate commits. Fetch upstream and review/merge upstream/master into custom-release, resolve conflicts, run checks and rebuild with the same signing key. Push customized code to origin/custom-release and the untouched upstream snapshot to origin/upstream-master. Preserve the existing fork master branch; do not reset it. Source bundles contain the final source; the local Git repository retains the checkpoint and merge history.
 
 ## Verification and limits
 
-See Build-verification-v6.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
+See Build-verification-2.7.2.6.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
 
 Clipping cannot recover past live segments no longer offered by the server, bypass DRM, or promise support for every codec. Encoding is necessary for frame-accurate boundaries that cannot be safely copied. Clip encoding has cancel/retry, not pause/resume. Android force-stop and foreground-service time limits can interrupt work. Offline torrent storage is private and removed when app data is cleared or the app uninstalled.
 
@@ -67,3 +67,13 @@ Official references:
 Raw AAC (.aac/ADTS) lacks the gapless metadata used by M4A/MP3 to describe encoder delay and padding. The requested interval is trimmed before encoding, but raw AAC playback can include codec-frame padding. Choose M4A, MP3 or WAV when precise decoded clip length matters. WAV is uncompressed and larger; transcoding cannot recover lost source quality.
 
 The M4A timeline is checked for the requested interval. Raw decoding of compressed audio can expose padding in its last codec frame; WAV has exact PCM sample boundaries. The supplied YouTube link is attempted in the Android test; see the build verification report for whether online access succeeded.
+
+## Custom releases and updates
+
+GitHub repository: https://github.com/ahmadrifat/mpvRx. Customized source is on custom-release; upstream-master retains untouched developer source. The original master branch is preserved. Updates for the custom build use only https://api.github.com/repos/ahmadrifat/mpvRx/releases/latest. Preview channel selection is hidden and ignored for custom builds. Automatic checks are enabled by default; users may disable them and check manually in About. A repository with no published stable release returns no update.
+
+Release versions use upstream major.minor.patch plus our mod revision: 2.7.2.6, followed by 2.7.2.7, or 2.7.3.1 after an upstream version change. Publish each version under its own tag (v2.7.2.6), as a non-draft, non-prerelease GitHub release marked latest, with the signed mpvRx-2.7.2.6-ARM-universal.apk asset. Four numeric components are compared, so revision 10 follows revision 9. Drafts and prereleases are excluded by the latest-release endpoint. Do not publish original-package APKs in these custom releases.
+
+The public version name is independent of Android's internal versionCode: this initial renamed release uses 70, higher than the previous 2.7.2-cs.6 build's 60. Increase customVersionCode for every subsequent APK; it must keep increasing even when upstream changes or mod revision resets. The universal code is customVersionCode times ten. Use the existing private release key. Publish modified source and third-party notices alongside every APK. Signing keys and local.properties remain private.
+
+Inherited original-build workflows are gated to the author's repository, preventing them from publishing original-package builds in this fork. Custom releases are built and signed locally until a dedicated custom signing workflow is configured.

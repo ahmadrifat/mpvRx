@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   check:
+    if: github.repository == 'Riteshp2001/mpvRx'
     name: Resolve preview build decision
     runs-on: ubuntu-latest
     timeout-minutes: 10

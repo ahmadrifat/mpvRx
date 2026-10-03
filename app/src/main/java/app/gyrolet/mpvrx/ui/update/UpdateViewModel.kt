@@ -45,19 +45,19 @@ class UpdateViewModel(
   private val prefs = application.getSharedPreferences("mpvrx_prefs", Context.MODE_PRIVATE)
   private val _isAutoUpdateEnabled =
     MutableStateFlow(
-      if (BuildConfig.ENABLE_UPDATE_FEATURE) prefs.getBoolean("auto_update", false) else false,
+      if (BuildConfig.ENABLE_UPDATE_FEATURE) prefs.getBoolean("auto_update", BuildConfig.IS_CUSTOM_BUILD) else false,
     )
   val isAutoUpdateEnabled: StateFlow<Boolean> = _isAutoUpdateEnabled.asStateFlow()
 
   private val _updateChannel =
     MutableStateFlow(
-      prefs.getString(UPDATE_CHANNEL_KEY, null)?.let(AppUpdateChannel::fromStoredValue)
+      if (BuildConfig.IS_CUSTOM_BUILD) AppUpdateChannel.STABLE else prefs.getString(UPDATE_CHANNEL_KEY, null)?.let(AppUpdateChannel::fromStoredValue)
         ?: if (BuildConfig.IS_PREVIEW_BUILD) AppUpdateChannel.PREVIEW else AppUpdateChannel.STABLE,
     )
   val updateChannel: StateFlow<AppUpdateChannel> = _updateChannel.asStateFlow()
 
   fun setUpdateChannel(channel: AppUpdateChannel) {
-    if (!BuildConfig.ENABLE_UPDATE_FEATURE || channel == _updateChannel.value) return
+    if (!BuildConfig.ENABLE_UPDATE_FEATURE || BuildConfig.IS_CUSTOM_BUILD || channel == _updateChannel.value) return
 
     prefs.edit().putString(UPDATE_CHANNEL_KEY, channel.name).apply()
     _updateChannel.value = channel

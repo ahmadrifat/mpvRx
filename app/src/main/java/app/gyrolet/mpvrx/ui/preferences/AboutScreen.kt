@@ -556,44 +556,47 @@ object AboutScreen : Screen {
 
               PreferenceDivider()
 
-              Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-              ) {
-                Text(
-                  text = stringResource(R.string.ui_update_channel),
-                  style = MaterialTheme.typography.titleMedium,
-                  fontWeight = FontWeight.SemiBold,
-                  color = cs.onSurface,
-                )
-                Text(
-                  text = stringResource(R.string.ui_preview_builds_summary),
-                  style = MaterialTheme.typography.bodyMedium,
-                  color = cs.outline,
-                )
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                  AppUpdateChannel.entries.forEachIndexed { index, channel ->
-                    SegmentedButton(
-                      selected = updateChannel == channel,
-                      onClick = { updateViewModel.setUpdateChannel(channel) },
-                      shape = SegmentedButtonDefaults.itemShape(index, AppUpdateChannel.entries.size),
-                      colors = themedSegmentedButtonColors(),
-                      label = {
-                        Text(
-                          stringResource(
-                            when (channel) {
-                              AppUpdateChannel.STABLE -> R.string.ui_stable_releases
-                              AppUpdateChannel.PREVIEW -> R.string.ui_preview_builds
-                            },
-                          ),
-                        )
-                      },
-                    )
+              if (!BuildConfig.IS_CUSTOM_BUILD) {
+                Column(
+                  modifier = Modifier.fillMaxWidth().padding(16.dp),
+                  verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  Text(
+                    text = stringResource(R.string.ui_update_channel),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onSurface,
+                  )
+                  Text(
+                    text = stringResource(R.string.ui_preview_builds_summary),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = cs.outline,
+                  )
+                  SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    AppUpdateChannel.entries.forEachIndexed { index, channel ->
+                      SegmentedButton(
+                        selected = updateChannel == channel,
+                        onClick = { updateViewModel.setUpdateChannel(channel) },
+                        shape = SegmentedButtonDefaults.itemShape(index, AppUpdateChannel.entries.size),
+                        colors = themedSegmentedButtonColors(),
+                        label = {
+                          Text(
+                            stringResource(
+                              when (channel) {
+                                AppUpdateChannel.STABLE -> R.string.ui_stable_releases
+                                AppUpdateChannel.PREVIEW -> R.string.ui_preview_builds
+                              },
+                            ),
+                          )
+                        },
+                      )
+                    }
                   }
                 }
-              }
 
-              PreferenceDivider()
+                PreferenceDivider()
+
+              }
 
               Column(modifier = Modifier.padding(16.dp)) {
                 Button(

@@ -42,11 +42,11 @@ class UpdateManager(
 
     val release =
       getLatestRelease(
-        when (channel) {
+        if (BuildConfig.IS_CUSTOM_BUILD) CUSTOM_RELEASE_URL else when (channel) {
           AppUpdateChannel.STABLE -> STABLE_RELEASE_URL
           AppUpdateChannel.PREVIEW -> PREVIEW_RELEASE_URL
         },
-      )
+      ) ?: return null
     if (selectBestApkAsset(release.assets) == null) {
       return null
     }
@@ -64,7 +64,9 @@ class UpdateManager(
     }
 
     val isNewer =
-      when (channel) {
+      if (BuildConfig.IS_CUSTOM_BUILD) {
+        CustomReleaseVersion.isNewer(release.tagName, BuildConfig.VERSION_NAME)
+      } else when (channel) {
         AppUpdateChannel.STABLE -> {
           val currentVersion = BuildConfig.VERSION_NAME.substringBefore('-')
           isNewerVersion(release.tagName.removePrefix("v"), currentVersion)
@@ -98,10 +100,11 @@ class UpdateManager(
       .apply()
   }
 
-  private suspend fun getLatestRelease(url: String): Release =
+  private suspend fun getLatestRelease(url: String): Release? =
     withContext(Dispatchers.IO) {
       val request = Request.Builder().url(url).header("Cache-Control", "no-cache").build()
       client.newCall(request).execute().use { response ->
+        if (BuildConfig.IS_CUSTOM_BUILD && response.code == 404) return@withContext null
         if (!response.isSuccessful) throw IOException("Unexpected code $response")
         val responseBody = response.body.string()
         json.decodeFromString<Release>(responseBody)
@@ -277,6 +280,7 @@ class UpdateManager(
   }
 
   private companion object {
+    const val CUSTOM_RELEASE_URL = "https://api.github.com/repos/ahmadrifat/mpvRx/releases/latest"
     const val STABLE_RELEASE_URL = "https://api.github.com/repos/Riteshp2001/mpvRx/releases/latest"
     const val PREVIEW_RELEASE_URL = "https://riteshp2001.github.io/mpvRx/latest.json"
     const val LEGACY_IGNORED_VERSION_KEY = "ignored_version"

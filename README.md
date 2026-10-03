@@ -1,3 +1,11 @@
+> **Custom mpvRx maintained by ahmadrifat**
+>
+> Package: `app.gyrolet.mpvrx.cs`. Install our signed APK from [Custom releases](https://github.com/ahmadrifat/mpvRx/releases/latest). The app checks this fork for updates.
+>
+> [Custom release and branch guide](CUSTOM_RELEASES.md) · [Build notes](CUSTOM_BUILD.md) · [Original project](https://github.com/Riteshp2001/mpvRx)
+>
+> The documentation below is retained from upstream; its original download links refer to the original app.
+
 <p align="center">
   <img src="fastlane/metadata/android/en-US/images/icon.png" width="250" height="250" alt="mpvRx app icon" />
 </p>

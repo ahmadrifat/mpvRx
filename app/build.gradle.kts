@@ -58,6 +58,7 @@ android {
 
     buildConfigField("String", "GIT_SHA", "\"${getCommitSha()}\"")
     buildConfigField("int", "GIT_COUNT", getCommitCount())
+    buildConfigField("boolean", "IS_CUSTOM_BUILD", "false")
 
     externalNativeBuild {
       cmake {
@@ -122,7 +123,7 @@ android {
     create("custom") {
       initWith(getByName("release"))
       applicationIdSuffix = ".cs"
-      versionNameSuffix = "-cs.6"
+      versionNameSuffix = ".6"
       isMinifyEnabled = false
       isShrinkResources = false
       signingConfig = if (localProperties.getProperty("custom.storeFile") != null) {
@@ -135,7 +136,8 @@ android {
       } else signingConfigs.getByName("debug")
       matchingFallbacks += listOf("release")
       buildConfigField("boolean", "IS_PREVIEW_BUILD", "false")
-      buildConfigField("boolean", "ENABLE_UPDATE_FEATURE", "false")
+      buildConfigField("boolean", "ENABLE_UPDATE_FEATURE", "true")
+      buildConfigField("boolean", "IS_CUSTOM_BUILD", "true")
       resValue("string", "app_name", "mpvRx")
     }
     named("release") {
@@ -238,7 +240,7 @@ androidComponents {
       }
 
       val channelVersionCode =
-        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 6)
+        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 7)
         else if (variant.buildType == "preview") previewVersionCode else (output.versionCode.orNull ?: stableVersionCode)
       output.versionCode.set(channelVersionCode * 10 + (abiCodes[abi] ?: 0))
     }
