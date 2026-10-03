@@ -775,6 +775,16 @@ fun RenderPlayerButton(
     }
 
     PlayerButton.DOWNLOAD -> DownloadCurrentButton()
+    PlayerButton.AUDIO_DOWNLOAD -> {
+      val clipOverlay = remember(activity) { ClipOverlayView.ensureAttached(activity) }
+      ControlsButton(
+        icon = button.icon,
+        onClick = { if (clipOverlay.openClip(audioOnly = true)) onOpenPanel(Panels.Clip) },
+        title = "Download audio",
+        color = if (hideBackground) controlColor else MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.size(buttonSize),
+      )
+    }
     PlayerButton.MORE_OPTIONS -> {
       ControlsButton(
         Icons.RoundedFilled.MoreVert,

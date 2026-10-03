@@ -18,8 +18,8 @@ class ClipExportService : Service() {
   override fun onCreate() {
     super.onCreate()
     val manager = getSystemService(NotificationManager::class.java)
-    manager.createNotificationChannel(NotificationChannel("clips", "Video clipping", NotificationManager.IMPORTANCE_LOW))
-    fun notification(job: ClipJobs.Job?) = NotificationCompat.Builder(this, "clips").setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle(job?.title ?: "Video clipping").setContentText(job?.status ?: "Preparing").setContentIntent(DownloadNavigation.pendingIntent(this)).setOngoing(true).setOnlyAlertOnce(true).setProgress(100, ((job?.progress ?: 0f) * 100).toInt(), job?.progress == null).build()
+    manager.createNotificationChannel(NotificationChannel("clips", "Clipping and audio downloads", NotificationManager.IMPORTANCE_LOW))
+    fun notification(job: ClipJobs.Job?) = NotificationCompat.Builder(this, "clips").setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle(job?.title ?: "Clipping and audio downloads").setContentText(job?.status ?: "Preparing").setContentIntent(DownloadNavigation.pendingIntent(this)).setOngoing(true).setOnlyAlertOnce(true).setProgress(100, ((job?.progress ?: 0f) * 100).toInt(), job?.progress == null).build()
     ServiceCompat.startForeground(this, 4202, notification(null), if (android.os.Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0)
     scope.launch { ClipJobs.jobs.collect { jobs ->
       val active = jobs.lastOrNull { it.active }

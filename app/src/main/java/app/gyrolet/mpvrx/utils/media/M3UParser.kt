@@ -103,7 +103,8 @@ object M3UParser {
     userAgent: String? = null,
     headers: Map<String, String> = emptyMap(),
     httpClient: OkHttpClient = defaultHttpClient,
-  ): M3UParseResult = parseFromUrl(url, userAgent, headers, httpClient, defaultLimits)
+    onResolvedUrl: (String) -> Unit = {},
+  ): M3UParseResult = parseFromUrl(url, userAgent, headers, httpClient, defaultLimits, onResolvedUrl)
 
   suspend fun parseFromUrl(
     url: String,
@@ -117,6 +118,7 @@ object M3UParser {
     headers: Map<String, String>,
     httpClient: OkHttpClient,
     limits: M3ULimits,
+    onResolvedUrl: (String) -> Unit = {},
   ): M3UParseResult {
     val originalUrl = url.toHttpUrlOrNull() ?: return error("Invalid playlist URL")
     val username = originalUrl.username
@@ -139,6 +141,7 @@ object M3UParser {
 
     return try {
       httpClient.newCall(request).awaitResponse().use { response ->
+        onResolvedUrl(response.request.url.newBuilder().username("").password("").build().toString())
         if (!response.isSuccessful) return error("HTTP error: ${response.code}")
         if (response.body.contentLength() > limits.maxBytes) return error(byteLimitMessage(limits))
         parseFromStream(

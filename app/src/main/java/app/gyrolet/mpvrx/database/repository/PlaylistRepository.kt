@@ -576,14 +576,17 @@ class PlaylistRepository(
     userAgent: String? = null,
   ): Result<Long> =
     try {
-      val accountUrl = url.toHttpUrlOrNull()
-      val accountUser = accountUrl?.queryParameter("username")
-      val accountPassword = accountUrl?.queryParameter("password")
-      if (!accountUser.isNullOrBlank() && !accountPassword.isNullOrBlank() && accountUrl.encodedPath.endsWith("/get.php")) {
-        val server = accountUrl.newBuilder().query(null).encodedPath(accountUrl.encodedPath.removeSuffix("/get.php").ifEmpty { "/" }).build().toString().trimEnd('/')
-        return createXtreamPlaylist(server, accountUser, accountPassword)
+      app.gyrolet.mpvrx.data.network.XtreamPlaylistLink.parse(url)?.let { account ->
+        return createXtreamPlaylist(account.server, account.username, account.password)
       }
-      val remotePlaylist = loadRemotePlaylist(url, userAgent).getOrElse { error -> return Result.failure(error) }
+      var resolvedUrl = url
+      val remoteResult = loadRemotePlaylist(url, userAgent) { resolvedUrl = it }
+      // Check the redirect destination even when its body is an HLS manifest or an expired
+      // account error: the Xtream client provides the correct catalog/account validation.
+      app.gyrolet.mpvrx.data.network.XtreamPlaylistLink.parse(resolvedUrl)?.let { account ->
+        return createXtreamPlaylist(account.server, account.username, account.password)
+      }
+      val remotePlaylist = remoteResult.getOrElse { error -> return Result.failure(error) }
       val playlistId =
         persistM3UPlaylist(
           parseResult = remotePlaylist.parseResult,
@@ -1057,6 +1060,7 @@ class PlaylistRepository(
   private suspend fun loadRemotePlaylist(
     sourceUrl: String,
     userAgent: String?,
+    onResolvedUrl: (String) -> Unit = {},
   ): Result<RemotePlaylist> {
     if (sourceUrl.startsWith("mpvrx-stalker-source://")) {
       return try {
@@ -1081,7 +1085,7 @@ class PlaylistRepository(
       }
     }
 
-    return when (val parseResult = M3UParser.parseFromUrl(sourceUrl, userAgent, httpClient = httpClient)) {
+    return when (val parseResult = M3UParser.parseFromUrl(sourceUrl, userAgent, httpClient = httpClient, onResolvedUrl = onResolvedUrl)) {
       is M3UParseResult.Success ->
         Result.success(
           RemotePlaylist(

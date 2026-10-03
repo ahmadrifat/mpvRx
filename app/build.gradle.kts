@@ -122,7 +122,7 @@ android {
     create("custom") {
       initWith(getByName("release"))
       applicationIdSuffix = ".custom"
-      versionNameSuffix = "-custom.3"
+      versionNameSuffix = "-custom.4"
       isMinifyEnabled = false
       isShrinkResources = false
       signingConfig = if (localProperties.getProperty("custom.storeFile") != null) {
@@ -136,7 +136,7 @@ android {
       matchingFallbacks += listOf("release")
       buildConfigField("boolean", "IS_PREVIEW_BUILD", "false")
       buildConfigField("boolean", "ENABLE_UPDATE_FEATURE", "false")
-      resValue("string", "app_name", "mpvRx Custom")
+      resValue("string", "app_name", "mpvRx")
     }
     named("release") {
       buildConfigField("boolean", "IS_PREVIEW_BUILD", "false")
@@ -238,7 +238,7 @@ androidComponents {
       }
 
       val channelVersionCode =
-        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 3)
+        if (variant.buildType == "custom") (project.findProperty("customVersionCode")?.toString()?.toInt() ?: 4)
         else if (variant.buildType == "preview") previewVersionCode else (output.versionCode.orNull ?: stableVersionCode)
       output.versionCode.set(channelVersionCode * 10 + (abiCodes[abi] ?: 0))
     }

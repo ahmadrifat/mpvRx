@@ -96,7 +96,7 @@ class AppearancePreferences(
   val topRightControls =
     preferenceStore.getString(
       "top_right_controls",
-      "CAST,CURRENT_CHAPTER,DECODER,AUDIO_TRACK,SUBTITLES,DOWNLOAD,MORE_OPTIONS",
+      "CAST,CURRENT_CHAPTER,DECODER,AUDIO_TRACK,SUBTITLES,DOWNLOAD,AUDIO_DOWNLOAD,MORE_OPTIONS",
     )
 
   val bottomRightControls =
@@ -114,7 +114,7 @@ class AppearancePreferences(
   val portraitBottomControls =
     preferenceStore.getString(
       "portrait_bottom_controls",
-      "CAST,SCREEN_ROTATION,DECODER,AUDIO_TRACK,SUBTITLES,BOOKMARKS_CHAPTERS,PLAYBACK_SPEED,BACKGROUND_PLAYBACK,REPEAT_MODE,SHUFFLE,VIDEO_ZOOM,FRAME_NAVIGATION,CLIP,SCOPES,ASPECT_RATIO,PICTURE_IN_PICTURE,LOCK_CONTROLS,DOWNLOAD,MORE_OPTIONS",
+      "CAST,SCREEN_ROTATION,DECODER,AUDIO_TRACK,SUBTITLES,BOOKMARKS_CHAPTERS,PLAYBACK_SPEED,BACKGROUND_PLAYBACK,REPEAT_MODE,SHUFFLE,VIDEO_ZOOM,FRAME_NAVIGATION,CLIP,SCOPES,ASPECT_RATIO,PICTURE_IN_PICTURE,LOCK_CONTROLS,DOWNLOAD,AUDIO_DOWNLOAD,MORE_OPTIONS",
     )
 
   private val castButtonMigrationComplete =
@@ -129,6 +129,18 @@ class AppearancePreferences(
       }
     }
 
+    val audioMigration = preferenceStore.getBoolean("audio_download_button_migration_v4", false)
+    if (!audioMigration.get()) {
+      listOf(topRightControls, portraitBottomControls).forEach { pref ->
+        val buttons = pref.get().split(',').filter(String::isNotBlank).toMutableList()
+        if ("AUDIO_DOWNLOAD" !in buttons) {
+          val index = buttons.indexOf("MORE_OPTIONS").takeIf { it >= 0 } ?: buttons.size
+          buttons.add(index, "AUDIO_DOWNLOAD")
+          pref.set(buttons.joinToString(","))
+        }
+      }
+      audioMigration.set(true)
+    }
     val downloadMigration = preferenceStore.getBoolean("download_button_migration_v2", false)
     if (!downloadMigration.get()) {
       listOf(topRightControls, portraitBottomControls).forEach { pref ->

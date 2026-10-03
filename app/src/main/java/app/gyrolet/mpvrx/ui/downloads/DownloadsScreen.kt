@@ -239,8 +239,8 @@ object DownloadsScreen : Screen {
               onPlay = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }, onDelete = { pendingTorrentDelete = torrent })
           }
           items(completedClips, key = { "clip_done_${it.id}" }) { clip ->
-            CompletedRow(title = clip.title, subtitle = "Clipped · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = null, mediaPath = clip.output, playable = clip.output != null,
-              onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title) } }, onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) })
+            CompletedRow(title = clip.title, subtitle = "${if (clip.audioOnly) "Audio" else "Clipped"} · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = null, mediaPath = clip.output, playable = clip.output != null,
+              onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title, isAudio = clip.audioOnly) } }, onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) })
           }
           items(completedYtdlp, key = { "ytdlp_done_${it.id}" }) { job ->
             CompletedRow(

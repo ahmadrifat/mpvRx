@@ -59,8 +59,20 @@ class ClipSmokeInstrumentation : Instrumentation() {
         val mergedVideo = (0 until mergedTracks.length()).map { mergedTracks.getJSONObject(it) }.first { it.getString("codec_type") == "video" }
         check(mergedVideo.getString("codec_name") == "h264" && mergedVideo.getString("nb_read_frames") == "120")
         check(mergedTracks.length() == 2)
+        val audioOutput = File(directory, "audio.m4a")
+        val audioError = app.gyrolet.mpvrx.ui.player.clip.AudioClipExporter.export(context,
+          source.absolutePath, source.absolutePath, audioOutput.absolutePath,
+          1.125, 1.792, emptyMap(), {}, {})
+        check(audioError == null) { audioError.orEmpty() }
+        val audioProbe = FfmpegRuntime.run(context, listOf("-v", "error", "-show_entries",
+          "format=duration:stream=codec_type,start_time", "-of", "json", audioOutput.absolutePath), probe = true)
+        val audioJson = org.json.JSONObject(audioProbe.second)
+        check(audioJson.getJSONArray("streams").length() == 1)
+        check(audioJson.getJSONArray("streams").getJSONObject(0).getString("codec_type") == "audio")
+        check(kotlin.math.abs(audioJson.getJSONObject("format").getString("duration").toDouble() - 0.667) <= 0.002)
+        check(kotlin.math.abs(audioJson.getJSONArray("streams").getJSONObject(0).getString("start_time").toDouble()) < 0.002)
         testConcurrentDirectDownloads(context, directory)
-        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads")
+        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; audio-only M4A trim with 2 ms duration/start checks")
         directory.deleteRecursively()
       }
       finish(android.app.Activity.RESULT_OK, result)

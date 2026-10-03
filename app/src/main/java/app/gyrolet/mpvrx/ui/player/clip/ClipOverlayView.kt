@@ -98,6 +98,7 @@ import kotlin.math.roundToLong
 private const val MIN_CLIP_SECONDS = 0.05
 
 private data class ClipPanelState(
+  val audioOnly: Boolean = false,
   val clipDuration: String? = null,
   val startSeconds: Float = 0f,
   val endSeconds: Float? = null,
@@ -129,6 +130,7 @@ class ClipOverlayView @JvmOverloads constructor(
 
   private var panelState by mutableStateOf(ClipPanelState())
 
+  private var audioOnly = false
   private var draft: ClipDraft? = null
   private var cropView: CropSelectionView? = null
   private var cropControls: ComposeView? = null
@@ -187,7 +189,13 @@ class ClipOverlayView @JvmOverloads constructor(
   override fun onTouchEvent(event: MotionEvent): Boolean =
     if (cropView != null) true else super.onTouchEvent(event)
 
-  fun openClip(): Boolean = beginClip()
+  fun openClip(audioOnly: Boolean = false): Boolean {
+    if (ClipExportManager.state.value !is ClipExportState.Exporting && this.audioOnly != audioOnly) {
+      draft = null
+      this.audioOnly = audioOnly
+    }
+    return beginClip()
+  }
 
   @Composable
   internal fun EditorPanel(onDismissRequest: () -> Unit) {
@@ -234,13 +242,13 @@ class ClipOverlayView @JvmOverloads constructor(
     draft?.takeIf { it.itemId == itemId }?.let { return it }
 
     val duration = mediaDurationSeconds()
-    var start = (currentPosition() ?: 0.0).coerceAtLeast(0.0)
+    var start = if (audioOnly) 0.0 else (currentPosition() ?: 0.0).coerceAtLeast(0.0)
     val end =
       if (duration > MIN_CLIP_SECONDS) {
         if (start >= duration - MIN_CLIP_SECONDS) {
           start = (duration - DEFAULT_CLIP_SECONDS).coerceAtLeast(0.0)
         }
-        (start + DEFAULT_CLIP_SECONDS).coerceAtMost(duration)
+        if (audioOnly) duration else (start + DEFAULT_CLIP_SECONDS).coerceAtMost(duration)
       } else {
         start + DEFAULT_CLIP_SECONDS
       }
@@ -338,7 +346,8 @@ class ClipOverlayView @JvmOverloads constructor(
           item = item,
           startSeconds = active.startSeconds,
           endSeconds = end,
-          crop = active.crop,
+          crop = if (audioOnly) null else active.crop,
+          audioOnly = audioOnly,
         ),
       )
     if (!accepted) toast(R.string.clip_export_busy)
@@ -524,6 +533,7 @@ class ClipOverlayView @JvmOverloads constructor(
     ClipEditorUiState.publish(active.startSeconds, active.endSeconds)
     panelState =
       panelState.copy(
+        audioOnly = audioOnly,
         clipDuration = active.endSeconds?.let { formatTime((it - active.startSeconds).coerceAtLeast(0.0)) },
         startSeconds = active.startSeconds.toFloat(),
         endSeconds = active.endSeconds?.toFloat(),
@@ -642,13 +652,13 @@ private fun ClipEditorPanel(
             .padding(top = MaterialTheme.spacing.small),
       ) {
         AppIcon(
-          imageVector = Icons.RoundedFilled.ContentCut,
+          imageVector = if (state.audioOnly) Icons.RoundedFilled.Headset else Icons.RoundedFilled.ContentCut,
           contentDescription = null,
           tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.size(22.dp),
         )
         Text(
-          text = stringResource(R.string.clip_action),
+          text = if (state.audioOnly) "Download audio" else stringResource(R.string.clip_action),
           style = MaterialTheme.typography.titleLarge,
           modifier = Modifier.padding(start = 10.dp),
         )
@@ -762,9 +772,9 @@ private fun ClipEditorPanelContent(
         modifier = Modifier.weight(0.7f),
       )
       ClipMetadata(
-        icon = Icons.RoundedFilled.AspectRatio,
+        icon = if (state.audioOnly) Icons.RoundedFilled.Headset else Icons.RoundedFilled.AspectRatio,
         text =
-          state.crop?.let { stringResource(R.string.clip_crop_size, it.width, it.height) }
+          if (state.audioOnly) "M4A audio" else state.crop?.let { stringResource(R.string.clip_crop_size, it.width, it.height) }
             ?: stringResource(R.string.clip_crop_full_frame),
         modifier = Modifier.weight(1.3f),
       )
@@ -794,7 +804,7 @@ private fun ClipEditorPanelContent(
       }
     }
 
-    OutlinedButton(
+    if (!state.audioOnly) OutlinedButton(
       onClick = onCrop,
       enabled = !state.exporting,
       modifier = Modifier.fillMaxWidth().height(48.dp),

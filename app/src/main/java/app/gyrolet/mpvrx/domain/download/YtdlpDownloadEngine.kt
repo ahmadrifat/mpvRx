@@ -478,9 +478,9 @@ class YtdlpDownloadEngine(
 
   internal data class ClipStreams(val video: String, val audio: String?, val headers: Map<String, String>)
   @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
-  internal suspend fun resolveForClip(url: String): ClipStreams = withContext(Dispatchers.IO) {
+  internal suspend fun resolveForClip(url: String, audioOnly: Boolean = false): ClipStreams = withContext(Dispatchers.IO) {
     require(YtdlpManager.ensureRuntimeInstalled(context)) { "Could not prepare yt-dlp" }
-    val base = buildCommand(url, "source.%(ext)s", context.cacheDir.absolutePath, context.cacheDir.absolutePath, "bestvideo+bestaudio/best").toMutableList()
+    val base = buildCommand(url, "source.%(ext)s", context.cacheDir.absolutePath, context.cacheDir.absolutePath, if (audioOnly) "bestaudio/best" else "bestvideo+bestaudio/best").toMutableList()
     val separator = base.indexOf("--")
     base.addAll(separator, listOf("--skip-download", "--dump-single-json", "--no-progress"))
     val process = startProcess(base)

@@ -10,7 +10,7 @@ import org.json.JSONObject
 import java.io.File
 
 object ClipJobs {
-  data class Job(val id: String, val title: String, val source: String, val playable: String, val start: Double, val end: Double, val crop: ClipCrop? = null, val headers: Map<String, String> = emptyMap(), val status: String = "Preparing", val progress: Float? = null, val output: String? = null, val error: String? = null, val torrentIndex: Int? = null) {
+  data class Job(val id: String, val title: String, val source: String, val playable: String, val start: Double, val end: Double, val crop: ClipCrop? = null, val headers: Map<String, String> = emptyMap(), val status: String = "Preparing", val progress: Float? = null, val output: String? = null, val error: String? = null, val torrentIndex: Int? = null, val audioOnly: Boolean = false) {
     val active get() = status in listOf("Preparing", "Downloading", "Clipping", "Saving")
   }
   private val state = MutableStateFlow<List<Job>>(emptyList())
@@ -26,7 +26,7 @@ object ClipJobs {
         val j = array.getJSONObject(index)
         val h = j.optJSONObject("headers") ?: JSONObject()
         val c = j.optJSONObject("crop")
-        val job = Job(j.getString("id"), j.getString("title"), j.getString("source"), j.getString("playable"), j.getDouble("start"), j.getDouble("end"), c?.let { ClipCrop(it.getInt("x"), it.getInt("y"), it.getInt("w"), it.getInt("h"), it.getInt("rotation")) }, h.keys().asSequence().associateWith { h.getString(it) }, status = j.getString("status"), output = j.optString("output").takeIf(String::isNotBlank), error = j.optString("error").takeIf(String::isNotBlank), torrentIndex = j.optInt("torrentIndex", -1).takeIf { it >= 0 })
+        val job = Job(j.getString("id"), j.getString("title"), j.getString("source"), j.getString("playable"), j.getDouble("start"), j.getDouble("end"), c?.let { ClipCrop(it.getInt("x"), it.getInt("y"), it.getInt("w"), it.getInt("h"), it.getInt("rotation")) }, h.keys().asSequence().associateWith { h.getString(it) }, status = j.getString("status"), output = j.optString("output").takeIf(String::isNotBlank), error = j.optString("error").takeIf(String::isNotBlank), torrentIndex = j.optInt("torrentIndex", -1).takeIf { it >= 0 }, audioOnly = j.optBoolean("audioOnly", false))
         if (job.active) job.copy(status = "Failed", error = "Clipping was interrupted. Tap Retry.") else job
       }
     }.getOrDefault(emptyList())
@@ -34,7 +34,7 @@ object ClipJobs {
   @Synchronized fun add(context: Context, request: ClipRequest): String {
     initialize(context)
     val id = java.util.UUID.randomUUID().toString()
-    state.value = state.value + Job(id, request.item.title ?: "Video clip", request.item.originalUri, request.item.playableUri, request.startSeconds, request.endSeconds, request.crop, request.item.headers, torrentIndex = request.item.torrentFileIndex)
+    state.value = state.value + Job(id, request.item.title ?: "Video clip", request.item.originalUri, request.item.playableUri, request.startSeconds, request.endSeconds, request.crop, request.item.headers, torrentIndex = request.item.torrentFileIndex, audioOnly = request.audioOnly)
     save()
     return id
   }
@@ -51,7 +51,7 @@ object ClipJobs {
     state.value = state.value.filterNot { it.id == job.id }; save()
   }
   fun retry(context: Context, job: Job) {
-    if (ClipExportManager.export(context, ClipRequest(PlaybackItem(job.id, job.source, job.playable, title = job.title, headers = job.headers, torrentFileIndex = job.torrentIndex), job.start, job.end, job.crop))) {
+    if (ClipExportManager.export(context, ClipRequest(PlaybackItem(job.id, job.source, job.playable, title = job.title, headers = job.headers, torrentFileIndex = job.torrentIndex), job.start, job.end, job.crop, job.audioOnly))) {
       synchronized(this) { state.value = state.value.filterNot { it.id == job.id }; save() }
     }
   }
@@ -59,7 +59,7 @@ object ClipJobs {
     lastWrite = System.currentTimeMillis()
     val array = JSONArray()
     state.value.forEach { j ->
-      val record = JSONObject().put("id", j.id).put("title", j.title).put("source", j.source).put("playable", j.playable).put("start", j.start).put("end", j.end).put("headers", JSONObject(j.headers)).put("status", j.status).put("output", j.output ?: "").put("error", j.error ?: "").put("torrentIndex", j.torrentIndex ?: -1)
+      val record = JSONObject().put("id", j.id).put("title", j.title).put("source", j.source).put("playable", j.playable).put("start", j.start).put("end", j.end).put("headers", JSONObject(j.headers)).put("status", j.status).put("output", j.output ?: "").put("error", j.error ?: "").put("torrentIndex", j.torrentIndex ?: -1).put("audioOnly", j.audioOnly)
       j.crop?.let { record.put("crop", JSONObject().put("x", it.x).put("y", it.y).put("w", it.width).put("h", it.height).put("rotation", it.rotation)) }
       array.put(record)
     }

@@ -51,6 +51,7 @@ data class ClipRequest(
   val startSeconds: Double,
   val endSeconds: Double,
   val crop: ClipCrop? = null,
+  val audioOnly: Boolean = false,
 )
 
 sealed interface ClipExportState {
@@ -74,8 +75,8 @@ sealed interface ClipExportState {
 /**
  * Process-scoped Clip export worker.
  *
- * Playback remains owned by libmpv. Export is intentionally handled by Media3 Transformer so a
- * bundled libmpv build without encoding mode can never fail Clip save during mpv_initialize().
+ * Playback remains owned by libmpv. Automatic video and audio exporters use Media3/FFmpeg
+ * independently, with shared progress, cancellation and permanent Downloads history.
  */
 object ClipExportManager {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -118,9 +119,17 @@ object ClipExportManager {
       var temporaryOutput: File? = null
       try {
         resolvedSource = resolveSource(appContext, request.item)
-        temporaryOutput = createTemporaryOutput(appContext)
+        temporaryOutput = createTemporaryOutput(appContext, request.audioOnly)
 
-        val error = AutomaticClipExporter.export(
+        val error = if (request.audioOnly) AudioClipExporter.export(
+          context = appContext, source = resolvedSource.uri, original = request.item.originalUri,
+          output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
+          headers = request.item.headers,
+          onProgress = { progress ->
+            _state.value = ClipExportState.Exporting(progress.toFloat())
+            ClipJobs.update(clipJobId, progress = progress.toFloat())
+          }, onStage = { stage -> ClipJobs.update(clipJobId, status = stage) },
+        ) else AutomaticClipExporter.export(
           context = appContext, source = resolvedSource.uri, original = request.item.originalUri,
           output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
           crop = request.crop, frameWidth = cropFrameSize?.first ?: 0, frameHeight = cropFrameSize?.second ?: 0,
@@ -138,12 +147,12 @@ object ClipExportManager {
         }
 
         if (!temporaryOutput.exists() || temporaryOutput.length() <= 0L) {
-          error("Clip export finished without producing an output video")
+          error("Export finished without producing a media file")
         }
 
-        val displayName = buildDisplayName(request.item)
+        val displayName = buildDisplayName(request.item, request.audioOnly)
         ClipJobs.update(clipJobId, status = "Saving")
-        val savedUri = saveToVideoLibrary(appContext, temporaryOutput, displayName)
+        val savedUri = saveToMediaLibrary(appContext, temporaryOutput, displayName, request.audioOnly)
         temporaryOutput = null
         ClipJobs.update(clipJobId, status = "Completed", progress = 1f, output = savedUri.toString())
         _state.value = ClipExportState.Success(savedUri, displayName)
@@ -188,9 +197,9 @@ object ClipExportManager {
     }
   }
 
-  private fun createTemporaryOutput(context: Context): File {
+  private fun createTemporaryOutput(context: Context, audioOnly: Boolean): File {
     val directory = File(context.cacheDir, "clips").apply { mkdirs() }
-    return File.createTempFile("mpvrx-clip-", ".mp4", directory).apply { delete() }
+    return File.createTempFile("mpvrx-clip-", if (audioOnly) ".m4a" else ".mp4", directory).apply { delete() }
   }
 
   private fun resolveSource(
@@ -244,7 +253,7 @@ object ClipExportManager {
     return ResolvedSource(uri = source)
   }
 
-  private fun buildDisplayName(item: PlaybackItem): String {
+  private fun buildDisplayName(item: PlaybackItem, audioOnly: Boolean): String {
     val base =
       item.title
         ?.substringBeforeLast('.')
@@ -252,25 +261,29 @@ object ClipExportManager {
         ?.takeIf { it.isNotBlank() }
         ?: "MPVRX"
     val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-    return "${base}_clip_$stamp.mp4"
+    return if (audioOnly) "${base}_audio_$stamp.m4a" else "${base}_clip_$stamp.mp4"
   }
 
-  private fun saveToVideoLibrary(
+  private fun saveToMediaLibrary(
     context: Context,
     source: File,
     displayName: String,
+    audioOnly: Boolean,
   ): Uri {
+    val mimeType = if (audioOnly) "audio/mp4" else "video/mp4"
+    val mediaDirectory = if (audioOnly) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
+    val collection = if (audioOnly) MediaStore.Audio.Media.EXTERNAL_CONTENT_URI else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       val resolver = context.contentResolver
       val values =
         ContentValues().apply {
           put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
-          put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-          put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/mpvRx/Clips")
+          put(MediaStore.Video.Media.MIME_TYPE, mimeType)
+          put(MediaStore.Video.Media.RELATIVE_PATH, "${mediaDirectory}/mpvRx/Clips")
           put(MediaStore.Video.Media.IS_PENDING, 1)
         }
       val uri =
-        resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+        resolver.insert(collection, values)
           ?: error("Unable to create a MediaStore entry for the clip")
       try {
         resolver.openOutputStream(uri, "w")?.use { output ->
@@ -294,18 +307,18 @@ object ClipExportManager {
     // storage access, fall back to the app's external Movies directory rather than losing output.
     val publicResult =
       runCatching {
-        val directory = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "mpvRx/Clips")
-        check(directory.exists() || directory.mkdirs()) { "Unable to create Movies/mpvRx/Clips" }
+        val directory = File(Environment.getExternalStoragePublicDirectory(mediaDirectory), "mpvRx/Clips")
+        check(directory.exists() || directory.mkdirs()) { "Unable to create the media output folder" }
         val target = uniqueFile(directory, displayName)
         source.copyTo(target)
         source.delete()
-        MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf("video/mp4"), null)
+        MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mimeType), null)
         Uri.fromFile(target)
       }
     publicResult.getOrNull()?.let { return it }
 
     val fallbackDirectory =
-      File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir, "Clips")
+      File(context.getExternalFilesDir(mediaDirectory) ?: context.filesDir, "Clips")
         .apply { mkdirs() }
     val fallback = uniqueFile(fallbackDirectory, displayName)
     source.copyTo(fallback)
