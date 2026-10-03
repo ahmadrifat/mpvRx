@@ -18,7 +18,7 @@ import java.util.Locale
 internal object AudioClipExporter {
   suspend fun export(context: Context, source: String, original: String, output: String,
     start: Double, end: Double, headers: Map<String, String>,
-    onProgress: (Double) -> Unit, onStage: (String) -> Unit, format: AudioExportFormat = AudioExportFormat.M4A): String? {
+    onProgress: (Double) -> Unit, onStage: (String) -> Unit, format: AudioExportFormat = AudioExportFormat.M4A, onThumbnail: (String?) -> Unit = {}): String? {
     var copiedInput: File? = null
     try {
       onStage("Preparing")
@@ -27,6 +27,7 @@ internal object AudioClipExporter {
       if (source.startsWith("http") || source.startsWith("edl://")) {
         if (YtdlpManager.requiresYtdlp(original)) {
           val streams = GlobalContext.get().get<YtdlpDownloadEngine>().resolveForClip(original, audioOnly = true)
+          onThumbnail(streams.thumbnail)
           input = streams.audio ?: streams.video
           requestHeaders = streams.headers + headers
         }
@@ -49,7 +50,9 @@ internal object AudioClipExporter {
         }
         addAll(listOf("-ss", "%.6f".format(Locale.US, start), "-i", input,
           "-t", duration, "-map", "0:a:0", "-vn", "-sn", "-dn",
-          "-af", "atrim=start=0:end=$duration,asetpts=PTS-STARTPTS",
+          // Audio tracks may start later or end earlier than the video timeline.
+          // Preserve that timeline with silence, rather than rejecting an otherwise valid cut.
+          "-af", "aresample=async=1:first_pts=0,apad=whole_dur=$duration,atrim=start=0:end=$duration,asetpts=PTS-STARTPTS",
           "-c:a", format.encoder))
         if (format != AudioExportFormat.WAV) addAll(listOf("-b:a", "192k"))
         if (format == AudioExportFormat.M4A) addAll(listOf("-movflags", "+faststart"))
@@ -82,7 +85,7 @@ internal object AudioClipExporter {
       } else json.optJSONObject("format")?.optString("duration")?.toDoubleOrNull()
       if (actualDuration == null || kotlin.math.abs(actualDuration - (end - start)) > (if (format == AudioExportFormat.AAC || format == AudioExportFormat.MP3) 0.10 else 0.03) ||
         tracks == null || tracks.length() != 1 || tracks.getJSONObject(0).optString("codec_type") != "audio") {
-        return "The saved audio did not pass timestamp validation"
+        return "Audio duration mismatch (requested ${"%.3f".format(Locale.US, end - start)} s, saved ${actualDuration?.let { "%.3f".format(Locale.US, it) } ?: "unknown"} s)."
       }
       onProgress(1.0)
       return null

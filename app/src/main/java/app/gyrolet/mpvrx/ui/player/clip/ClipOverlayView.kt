@@ -490,7 +490,7 @@ class ClipOverlayView @JvmOverloads constructor(
       }
       is ClipExportState.Error -> {
         if (lastTerminalState !== state) {
-          toast(context.getString(R.string.clip_export_failed, state.message))
+          toast(if (audioOnly) "Audio export failed: ${state.message}" else context.getString(R.string.clip_export_failed, state.message))
           lastTerminalState = state
           ClipExportManager.consumeTerminalState()
           panelState = panelState.copy(exporting = false, cancelling = false)
@@ -886,9 +886,9 @@ private fun ClipEditorPanelContent(
           enabled = state.canSave && startTimeValid && endTimeValid,
           modifier = Modifier.weight(1.4f).height(48.dp),
         ) {
-          AppIcon(Icons.RoundedFilled.ContentCut, contentDescription = null, modifier = Modifier.size(18.dp))
+          AppIcon(if (state.audioOnly) Icons.RoundedFilled.AudioDownload else Icons.RoundedFilled.ContentCut, contentDescription = null, modifier = Modifier.size(18.dp))
           Spacer(Modifier.width(8.dp))
-          Text(stringResource(R.string.clip_save), maxLines = 1)
+          Text(if (state.audioOnly) "Save audio" else stringResource(R.string.clip_save), maxLines = 1)
         }
       }
     }

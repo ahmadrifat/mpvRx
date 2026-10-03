@@ -14,7 +14,7 @@ import java.io.File
 import org.koin.core.context.GlobalContext
 
 internal object AutomaticClipExporter {
-  suspend fun export(context: Context, source: String, original: String, output: String, start: Double, end: Double, crop: ClipCrop?, frameWidth: Int, frameHeight: Int, headers: Map<String, String>, onProgress: (Double) -> Unit, onStage: (String) -> Unit): String? {
+  suspend fun export(context: Context, source: String, original: String, output: String, start: Double, end: Double, crop: ClipCrop?, frameWidth: Int, frameHeight: Int, headers: Map<String, String>, onProgress: (Double) -> Unit, onStage: (String) -> Unit, onThumbnail: (String?) -> Unit = {}): String? {
     onStage("Preparing")
     var acquired: File? = null
     var effective = source
@@ -25,6 +25,7 @@ internal object AutomaticClipExporter {
       val extractorSite = (original.startsWith("http://") || original.startsWith("https://")) && YtdlpManager.requiresYtdlp(original)
       if (extractorSite && (source.startsWith("http") || source.startsWith("edl://"))) {
         val streams = GlobalContext.get().get<YtdlpDownloadEngine>().resolveForClip(original)
+        onThumbnail(streams.thumbnail)
         effective = streams.video
         audio = streams.audio
         requestHeaders = streams.headers + headers

@@ -127,6 +127,7 @@ object ClipExportManager {
           context = appContext, source = resolvedSource.uri, original = request.item.originalUri,
           output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
           headers = request.item.headers,
+          onThumbnail = { ClipJobs.update(clipJobId, posterUrl = it) },
           onProgress = { progress ->
             _state.value = ClipExportState.Exporting(progress.toFloat())
             ClipJobs.update(clipJobId, progress = progress.toFloat())
@@ -136,6 +137,7 @@ object ClipExportManager {
           output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
           crop = request.crop, frameWidth = cropFrameSize?.first ?: 0, frameHeight = cropFrameSize?.second ?: 0,
           headers = request.item.headers,
+          onThumbnail = { ClipJobs.update(clipJobId, posterUrl = it) },
           onProgress = { progress ->
             _state.value = ClipExportState.Exporting(progress.toFloat())
             ClipJobs.update(clipJobId, progress = progress.toFloat())

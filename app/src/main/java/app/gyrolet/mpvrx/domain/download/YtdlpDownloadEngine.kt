@@ -476,7 +476,7 @@ class YtdlpDownloadEngine(
     return YtdlpManager.startPythonProcess(command, context)
   }
 
-  internal data class ClipStreams(val video: String, val audio: String?, val headers: Map<String, String>)
+  internal data class ClipStreams(val video: String, val audio: String?, val headers: Map<String, String>, val thumbnail: String? = null)
   @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
   internal suspend fun resolveForClip(url: String, audioOnly: Boolean = false): ClipStreams = withContext(Dispatchers.IO) {
     require(YtdlpManager.ensureRuntimeInstalled(context)) { "Could not prepare yt-dlp" }
@@ -495,7 +495,7 @@ class YtdlpDownloadEngine(
       val video = all.firstOrNull { it.optString("vcodec") != "none" } ?: root
       val audio = all.firstOrNull { it.optString("vcodec") == "none" && it.optString("acodec") != "none" }
       val h = video.optJSONObject("http_headers") ?: root.optJSONObject("http_headers") ?: org.json.JSONObject()
-      ClipStreams(video.getString("url"), audio?.getString("url"), h.keys().asSequence().associateWith { h.getString(it) })
+      ClipStreams(video.getString("url"), audio?.getString("url"), h.keys().asSequence().associateWith { h.getString(it) }, root.optString("thumbnail").takeIf { it.startsWith("http") })
     } finally { cancellation?.dispose(); if (process.isAlive) process.destroyForcibly() }
   }
 

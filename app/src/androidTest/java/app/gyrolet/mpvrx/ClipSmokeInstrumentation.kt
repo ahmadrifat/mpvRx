@@ -9,9 +9,11 @@ import java.io.File
 
 /** Runs on a real Android runtime, without a third-party test runner. */
 class ClipSmokeInstrumentation : Instrumentation() {
+  private var onlineSource: String? = null
   private var keepFixtures = false
   override fun onCreate(arguments: Bundle?) {
     super.onCreate(arguments)
+    onlineSource = arguments?.getString("onlineSource")
     keepFixtures = arguments?.getString("keepFixtures") == "true"
     start()
   }
@@ -95,8 +97,57 @@ class ClipSmokeInstrumentation : Instrumentation() {
           val tolerance = if (format.name == "AAC") 0.10 else 0.002
           check(kotlin.math.abs(seconds - 0.667) <= tolerance) { "${format.name} decoded duration $seconds" }
         }
+        val shortAudioSource = File(directory, "short-audio-source.mp4")
+        check(FfmpegRuntime.run(context, listOf("-y", "-i", source.absolutePath,
+          "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy", "-af", "atrim=end=3.5",
+          "-c:a", "aac", shortAudioSource.absolutePath)).first == 0)
+        val endTrim = File(directory, "end-trim.m4a")
+        val endError = app.gyrolet.mpvrx.ui.player.clip.AudioClipExporter.export(context,
+          shortAudioSource.absolutePath, shortAudioSource.absolutePath, endTrim.absolutePath,
+          1.125, 4.0, emptyMap(), {}, {})
+        check(endError == null) { "Audio shorter than video: $endError" }
+        val endPcm = File(directory, "end-trim.pcm")
+        check(FfmpegRuntime.run(context, listOf("-y", "-i", endTrim.absolutePath,
+          "-ac", "1", "-ar", "48000", "-f", "s16le", endPcm.absolutePath)).first == 0)
+        val decodedEndDuration = endPcm.length() / 96000.0
+        // AAC decoding emits whole codec frames. The M4A timeline stores the exact end;
+        // a raw PCM decoder can expose the padded tail of that last frame.
+        check(decodedEndDuration >= 2.875 - 0.002 && decodedEndDuration <= 2.875 + 1024.0 / 48000) { "Decoded AAC end $decodedEndDuration" }
+        val endProbe = FfmpegRuntime.run(context, listOf("-v", "error", "-show_entries",
+          "format=duration", "-of", "json", endTrim.absolutePath), probe = true)
+        check(kotlin.math.abs(org.json.JSONObject(endProbe.second).getJSONObject("format")
+          .getString("duration").toDouble() - 2.875) <= 0.002)
+        val tail = endPcm.readBytes().takeLast(9600)
+        check(tail.all { it.toInt() == 0 }) { "Missing end audio should be silence" }
+        val longSource = File(directory, "long-audio.wav")
+        check(FfmpegRuntime.run(context, listOf("-y", "-f", "lavfi", "-i",
+          "sine=frequency=440:sample_rate=44100", "-t", "229.85", "-c:a", "pcm_s16le", longSource.absolutePath)).first == 0)
+        val longOutput = File(directory, "long-trim.m4a")
+        val longError = app.gyrolet.mpvrx.ui.player.clip.AudioClipExporter.export(context,
+          longSource.absolutePath, longSource.absolutePath, longOutput.absolutePath,
+          10.7, 230.0, emptyMap(), {}, {})
+        check(longError == null) { "219.300 second trim: $longError" }
+        val longProbe = FfmpegRuntime.run(context, listOf("-v", "error", "-show_entries",
+          "format=duration", "-of", "json", longOutput.absolutePath), probe = true)
+        check(kotlin.math.abs(org.json.JSONObject(longProbe.second).getJSONObject("format")
+          .getString("duration").toDouble() - 219.3) <= 0.003)
+        val delayedSource = File(directory, "delayed-source.mp4")
+        check(FfmpegRuntime.run(context, listOf("-y", "-i", source.absolutePath,
+          "-itsoffset", "0.25", "-i", source.absolutePath, "-map", "0:v:0", "-map", "1:a:0",
+          "-c", "copy", "-t", "4", delayedSource.absolutePath)).first == 0)
+        val delayedOutput = File(directory, "delayed.wav")
+        val delayedError = app.gyrolet.mpvrx.ui.player.clip.AudioClipExporter.export(context,
+          delayedSource.absolutePath, delayedSource.absolutePath, delayedOutput.absolutePath,
+          0.0, 1.0, emptyMap(), {}, {}, app.gyrolet.mpvrx.ui.player.clip.AudioExportFormat.WAV)
+        check(delayedError == null) { "Delayed audio: $delayedError" }
         testConcurrentDirectDownloads(context, directory)
-        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; M4A/MP3/WAV/AAC exports, decoded trim checks, M4A 2 ms duration/start checks")
+        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; M4A/MP3/WAV/AAC exports, decoded trim checks, M4A 2 ms duration/start checks; audio shorter than video, 219.300 s trim at 44.1 kHz, and delayed-audio timeline regressions")
+        onlineSource?.let { url ->
+          val onlineOutput = File(directory, "online.m4a")
+          val onlineError = app.gyrolet.mpvrx.ui.player.clip.AudioClipExporter.export(context,
+            url, url, onlineOutput.absolutePath, 10.7, 230.0, emptyMap(), {}, {})
+          result.putString("online_result", if (onlineError == null) "PASS: supplied YouTube interval" else "NOT VERIFIED: $onlineError")
+        }
         if (!keepFixtures) directory.deleteRecursively()
       }
       finish(android.app.Activity.RESULT_OK, result)

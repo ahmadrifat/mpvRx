@@ -202,7 +202,7 @@ object DownloadsScreen : Screen {
             }
           }
           items(activeClips, key = { "clip_${it.id}" }) { clip ->
-            DownloadMediaRow(title = clip.title, subtitle = clip.error ?: clip.status, posterUrl = null, isError = clip.status == "Failed", progress = clip.progress, indeterminate = clip.active && clip.progress == null) {
+            DownloadMediaRow(title = clip.title, subtitle = clip.error ?: clip.status, posterUrl = clip.posterUrl, isError = clip.status == "Failed", progress = clip.progress, indeterminate = clip.active && clip.progress == null) {
               if (clip.active) IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipExportManager.cancel() }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Cancel") }
               else {
                 IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.retry(context, clip) }) { Icon(Icons.RoundedFilled.Refresh, contentDescription = "Retry") }
@@ -239,7 +239,7 @@ object DownloadsScreen : Screen {
               onPlay = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }, onDelete = { pendingTorrentDelete = torrent })
           }
           items(completedClips, key = { "clip_done_${it.id}" }) { clip ->
-            CompletedRow(title = clip.title, subtitle = "${if (clip.audioOnly) "${clip.audioFormat.name} audio" else "Clipped"} · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = null, mediaPath = clip.output, playable = clip.output != null,
+            CompletedRow(title = clip.title, subtitle = "${if (clip.audioOnly) "${clip.audioFormat.name} audio" else "Clipped"} · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = clip.posterUrl, mediaPath = clip.output, playable = clip.output != null,
               onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title, isAudio = clip.audioOnly) } }, onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) })
           }
           items(completedYtdlp, key = { "ytdlp_done_${it.id}" }) { job ->

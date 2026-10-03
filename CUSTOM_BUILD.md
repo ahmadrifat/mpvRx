@@ -1,12 +1,17 @@
-# mpvRx 2.7.2-cs.5
+# mpvRx 2.7.2-cs.6
 
 Based on upstream 594bfc67, with the previous custom source checkpoint preserved in Git.
 
 ## Installation
 
-Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.cs. Version code: 50. The package ID changed from .custom to .cs at the user's request. This release installs separately from the earlier custom app and does not automatically transfer its settings/playlists. It coexists with both that app and the author's original app. Subsequent .cs releases with the same signing key can update this installation. An APK with the original package but a different signing certificate cannot update the author's installation.
+Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.cs. Version code: 60. The package ID changed from .custom to .cs at the user's request. This release installs separately from the earlier custom app and does not automatically transfer its settings/playlists. It coexists with both that app and the author's original app. Subsequent .cs releases with the same signing key can update this installation. An APK with the original package but a different signing certificate cannot update the author's installation.
 
 ## Changes
+
+- Audio/clip download history now retains yt-dlp thumbnail URLs or existing playback artwork, reusing the current Downloads image loader. No web-search service is added.
+- Audio mode now uses Save audio and the audio icon instead of Save clip. Audio failures are labelled Audio export failed.
+- Audio export now aligns delayed audio and fills missing end audio with silence so the requested interval matches the video timeline even when the audio track is shorter. Timestamp validation is retained. Regression checks cover delayed tracks, shorter audio and a 10.700–230.000 s interval at 44.1 kHz.
+
 
 - Displayed name is now mpvRx; package and signing identity remain unchanged for in-place upgrades.
 - Panel defaults follow the requested screenshots. Video/audio download controls are before More in Top Right and Portrait Bottom. Existing customized selections remain saved; Reset defaults applies the full default panel configuration.
@@ -41,7 +46,7 @@ Keep feature changes in separate commits. Fetch and merge origin/master periodic
 
 ## Verification and limits
 
-See Build-verification-v5.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
+See Build-verification-v6.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
 
 Clipping cannot recover past live segments no longer offered by the server, bypass DRM, or promise support for every codec. Encoding is necessary for frame-accurate boundaries that cannot be safely copied. Clip encoding has cancel/retry, not pause/resume. Android force-stop and foreground-service time limits can interrupt work. Offline torrent storage is private and removed when app data is cleared or the app uninstalled.
 
@@ -60,3 +65,5 @@ Official references:
 - https://developers.google.com/android/play-protect/warning-dev-guidance
 
 Raw AAC (.aac/ADTS) lacks the gapless metadata used by M4A/MP3 to describe encoder delay and padding. The requested interval is trimmed before encoding, but raw AAC playback can include codec-frame padding. Choose M4A, MP3 or WAV when precise decoded clip length matters. WAV is uncompressed and larger; transcoding cannot recover lost source quality.
+
+The M4A timeline is checked for the requested interval. Raw decoding of compressed audio can expose padding in its last codec frame; WAV has exact PCM sample boundaries. The supplied YouTube link is attempted in the Android test; see the build verification report for whether online access succeeded.
