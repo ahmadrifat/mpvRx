@@ -5192,6 +5192,9 @@ class PlayerActivity :
     }
 
     PlaybackSession.setPropertyDouble("sub-delay", subDelay)
+    // The secondary track has its own delay property and is otherwise left on the startup
+    // value, so a saved sync would silently not apply to it.
+    PlaybackSession.setPropertyDouble("secondary-sub-delay", subDelay)
     PlaybackSession.setPropertyDouble("speed", state.playbackSpeed)
     // Re-apply audio-pitch-correction after speed change, as mpv resets it to default
     PlaybackSession.setPropertyBoolean("audio-pitch-correction", audioPreferences.audioPitchCorrection.get())
