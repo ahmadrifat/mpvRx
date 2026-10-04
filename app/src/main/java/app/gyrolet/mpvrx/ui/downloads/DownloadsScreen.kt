@@ -45,6 +45,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -135,6 +137,18 @@ object DownloadsScreen : Screen {
         }
       }
 
+    val renameScope = rememberCoroutineScope()
+    var renameTarget by remember { mutableStateOf<RenameTarget?>(null) }
+    var renameName by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf(false) }
+    fun requestRename(path: String?, save: suspend (String) -> Unit) {
+      if (path == null) return
+      renameScope.launch {
+        runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.gyrolet.mpvrx.domain.download.DownloadFileRename.displayName(context, path) } }
+          .onSuccess { renameName = it; renameTarget = RenameTarget(save) }
+          .onFailure { Toast.makeText(context, context.getString(R.string.custom_rename_failed, it.message.orEmpty()), Toast.LENGTH_LONG).show() }
+      }
+    }
     var pendingDelete by remember { mutableStateOf<AppDownload?>(null) }
 
     app.gyrolet.mpvrx.ui.player.clip.ClipJobs.initialize(context)
@@ -195,7 +209,7 @@ object DownloadsScreen : Screen {
         if (activeDownloads.isNotEmpty() || activeYtdlp.isNotEmpty() || activeTorrents.isNotEmpty() || activeClips.isNotEmpty()) {
           item(key = "active_header") { SectionHeader(stringResource(R.string.downloads_active_section)) }
           items(activeTorrents, key = { "torrent_${it.id}" }) { torrent ->
-            DownloadMediaRow(title = torrent.title, subtitle = "${torrent.status} · ${(torrent.progress * 100).toInt()}%", posterUrl = null, progress = torrent.progress, indeterminate = false) {
+            DownloadMediaRow(title = torrent.title, subtitle = torrentStatusLine(torrent), posterUrl = null, progress = torrent.progress, indeterminate = false) {
               if (torrent.status == "Downloading") IconButton(onClick = { offline.pause(torrent.id) }) { Icon(Icons.RoundedFilled.Pause, contentDescription = "Pause") }
               else IconButton(onClick = { offline.resume(context, torrent) }) { Icon(Icons.RoundedFilled.PlayArrow, contentDescription = "Resume") }
               IconButton(onClick = { pendingTorrentDelete = torrent }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Cancel") }
@@ -236,11 +250,11 @@ object DownloadsScreen : Screen {
           item(key = "completed_header") { SectionHeader(stringResource(R.string.downloads_completed_section)) }
           items(completedTorrents, key = { "torrent_done_${it.id}" }) { torrent ->
             CompletedRow(title = torrent.title, subtitle = File(torrent.path).name, posterUrl = null, mediaPath = torrent.path, playable = torrent.complete,
-              onPlay = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }, onDelete = { pendingTorrentDelete = torrent })
+              onRename = { requestRename(torrent.path) { name -> offline.rename(context, torrent, name) } }, onPlay = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }, onDelete = { pendingTorrentDelete = torrent })
           }
           items(completedClips, key = { "clip_done_${it.id}" }) { clip ->
             CompletedRow(title = clip.title, subtitle = "${if (clip.audioOnly) "${clip.audioFormat.name} audio" else "Clipped"} · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = clip.posterUrl, mediaPath = clip.output, playable = clip.output != null,
-              onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title, isAudio = clip.audioOnly) } }, onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) })
+              onRename = { requestRename(clip.output) { name -> app.gyrolet.mpvrx.ui.player.clip.ClipJobs.rename(context, clip, name) } }, onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title, isAudio = clip.audioOnly) } }, onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) })
           }
           items(completedYtdlp, key = { "ytdlp_done_${it.id}" }) { job ->
             CompletedRow(
@@ -249,6 +263,7 @@ object DownloadsScreen : Screen {
               posterUrl = job.posterUrl,
               mediaPath = job.outputFile,
               playable = job.outputFile?.let { File(it).isFile } == true,
+              onRename = { requestRename(job.outputFile) { name -> ytdlpEngine.rename(job, name) } },
               onPlay = {
                 job.outputFile?.let { path ->
                   MediaUtils.playFile(source = path, context = context, launchSource = "downloads", title = job.title)
@@ -272,6 +287,7 @@ object DownloadsScreen : Screen {
                 }
               },
               playable = download.isPlayable,
+              onRename = { requestRename(download.file.absolutePath) { name -> downloadManager.rename(download, name) } },
               onPlay = {
                 MediaUtils.playFile(
                   source = download.file.absolutePath,
@@ -295,6 +311,25 @@ object DownloadsScreen : Screen {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { offline.remove(torrent, false) }
         pendingTorrentDelete = null
       }
+    }
+    renameTarget?.let { target ->
+      AlertDialog(
+        onDismissRequest = { if (!renaming) renameTarget = null },
+        title = { Text(stringResource(R.string.custom_rename_file)) },
+        text = { OutlinedTextField(value = renameName, onValueChange = { renameName = it }, label = { Text(stringResource(R.string.custom_filename)) }, singleLine = true, enabled = !renaming) },
+        confirmButton = { TextButton(enabled = !renaming && renameName.isNotBlank(), onClick = {
+          renaming = true
+          renameScope.launch {
+            try {
+              kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { target.save(renameName.trim()) }
+              renameTarget = null
+            } catch (error: Exception) {
+              Toast.makeText(context, context.getString(R.string.custom_rename_failed, error.message.orEmpty()), Toast.LENGTH_LONG).show()
+            } finally { renaming = false }
+          }
+        }) { Text(stringResource(R.string.custom_rename_file)) } },
+        dismissButton = { TextButton(enabled = !renaming, onClick = { renameTarget = null }) { Text(stringResource(R.string.generic_cancel)) } },
+      )
     }
     pendingDelete?.let { download ->
       AlertDialog(
@@ -568,6 +603,7 @@ private fun CompletedRow(
   posterUrl: String?,
   mediaPath: String?,
   playable: Boolean,
+  onRename: () -> Unit,
   onPlay: () -> Unit,
   onDelete: () -> Unit,
 ) {
@@ -577,6 +613,9 @@ private fun CompletedRow(
     posterUrl = posterUrl,
     mediaPath = mediaPath,
   ) {
+    IconButton(onClick = onRename, enabled = playable) {
+      Icon(Icons.RoundedFilled.Edit, contentDescription = stringResource(R.string.custom_rename_file))
+    }
     IconButton(onClick = onPlay, enabled = playable) {
       Icon(
         Icons.RoundedFilled.PlayArrow,
@@ -636,4 +675,12 @@ private fun formatBytes(bytes: Long): String {
   val mb = kb / 1024.0
   if (mb < 1024) return "%.1f MB".format(Locale.US, mb)
   return "%.2f GB".format(Locale.US, mb / 1024.0)
+}
+
+private class RenameTarget(val save: suspend (String) -> Unit)
+
+private fun torrentStatusLine(torrent: app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.Download): String = buildString {
+  append("${(torrent.progress * 100).toInt()}%  •  ${formatBytes(torrent.downloaded)}/${formatBytes(torrent.size)}")
+  if (torrent.status == "Downloading") append("  •  ${formatBytes(torrent.speedBytesPerSec)}/s")
+  else append("  •  ${torrent.status}")
 }

@@ -42,6 +42,17 @@ object ClipJobs {
     state.value = state.value.map { if (it.id == id) it.copy(status = status ?: it.status, progress = progress, output = output ?: it.output, error = error, posterUrl = posterUrl ?: it.posterUrl) else it }
     if (status != null || System.currentTimeMillis() - lastWrite > 1500) save()
   }
+  suspend fun rename(context: Context, job: Job, name: String) {
+    require(job.status == "Completed") { "Wait for the export to finish" }
+    app.gyrolet.mpvrx.domain.download.DownloadFileRename.rename(context, job.output ?: error("File not found"), name) { path ->
+      synchronized(this) {
+        val previous = state.value
+        state.value = previous.map { if (it.id == job.id) it.copy(output = path, title = name.substringBeforeLast('.')) else it }
+        try { save() } catch (error: Throwable) { state.value = previous; throw error }
+      }
+    }
+  }
+
   @Synchronized fun remove(context: Context, job: Job) {
     if (job.active) return
     job.output?.let { uri ->

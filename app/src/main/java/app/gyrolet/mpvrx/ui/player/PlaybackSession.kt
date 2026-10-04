@@ -992,9 +992,8 @@ object PlaybackSession : MPVLib.EventObserver {
       }
       clearTimelinePropertiesLocked()
       // URL-specific headers are request metadata, not a global mpv preference. Always apply the
-      // media UA, then restore the post-mpv.conf default for a headerless item. Both writes are
-      // skipped when the value already matches what is applied, so a local file after another
-      // local file costs nothing while a headerless item still gets the default back.
+      // media UA, then restore the post-mpv.conf default for a headerless item. The user-agent write is
+      // skipped when it already matches; header fields are always replaced, including empty ones.
       val userAgent = PlaybackHttpHeaders.userAgent(resolvedItem.headers) ?: defaultUserAgent.orEmpty()
       if (userAgent != appliedUserAgent) {
         MPVLib.setPropertyString("user-agent", userAgent)

@@ -71,6 +71,7 @@ class YtdlpDownloadEngine(
   private val nextId = AtomicInteger(1)
   private val _jobs = MutableStateFlow<List<Job>>(emptyList())
   val jobs: StateFlow<List<Job>> = _jobs.asStateFlow()
+  private val historyLock = Any()
   private val historyFile = File(context.filesDir, "ytdlp-downloads.json")
   private val historyJson = Json { ignoreUnknownKeys = true }
   init {
@@ -82,11 +83,7 @@ class YtdlpDownloadEngine(
     nextId.set((_jobs.value.maxOfOrNull { it.id } ?: 0) + 1)
     CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
       jobs.collect { saved ->
-        runCatching {
-          val temporary = File(context.filesDir, "ytdlp-downloads.json.tmp")
-          temporary.writeText(historyJson.encodeToString(saved))
-          java.nio.file.Files.move(temporary.toPath(), historyFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        }.onFailure { Log.w(TAG, "Unable to persist download history") }
+        runCatching { synchronized(historyLock) { saveHistory() } }.onFailure { Log.w(TAG, "Unable to persist download history") }
       }
     }
   }
@@ -127,6 +124,27 @@ class YtdlpDownloadEngine(
     }
     YtdlpDownloadService.start(context)
     return id
+  }
+
+  suspend fun rename(job: Job, name: String) {
+    require(job.state == JobState.SUCCESS) { "Wait for the download to finish" }
+    val old = job.outputFile ?: error("File not found")
+    DownloadFileRename.rename(context, old, name) { path ->
+      val updated = job.copy(title = name.substringBeforeLast('.'), outputFile = path, artifactFiles = job.artifactFiles.map { if (it == old) path else it }.toSet())
+      synchronized(historyLock) {
+        _jobs.update { current -> current.map { if (it.id == job.id) updated else it } }
+        try { saveHistory() } catch (error: Throwable) {
+          _jobs.update { current -> current.map { if (it.id == job.id) job else it } }
+          throw error
+        }
+      }
+    }
+  }
+
+  private fun saveHistory() {
+    val temporary = File(context.filesDir, "ytdlp-downloads.json.tmp")
+    temporary.writeText(historyJson.encodeToString(_jobs.value))
+    java.nio.file.Files.move(temporary.toPath(), historyFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
   }
 
   fun pause(id: Int) {

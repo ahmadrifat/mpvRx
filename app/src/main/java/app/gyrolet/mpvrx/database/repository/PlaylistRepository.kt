@@ -574,23 +574,24 @@ class PlaylistRepository(
   suspend fun createM3UPlaylist(
     url: String,
     userAgent: String? = null,
+    name: String? = null,
   ): Result<Long> =
     try {
       app.gyrolet.mpvrx.data.network.XtreamPlaylistLink.parse(url)?.let { account ->
-        return createXtreamPlaylist(account.server, account.username, account.password)
+        return createXtreamPlaylist(account.server, account.username, account.password, name)
       }
       var resolvedUrl = url
       val remoteResult = loadRemotePlaylist(url, userAgent) { resolvedUrl = it }
       // Check the redirect destination even when its body is an HLS manifest or an expired
       // account error: the Xtream client provides the correct catalog/account validation.
       app.gyrolet.mpvrx.data.network.XtreamPlaylistLink.parse(resolvedUrl)?.let { account ->
-        return createXtreamPlaylist(account.server, account.username, account.password)
+        return createXtreamPlaylist(account.server, account.username, account.password, name)
       }
       val remotePlaylist = remoteResult.getOrElse { error -> return Result.failure(error) }
       val playlistId =
         persistM3UPlaylist(
           parseResult = remotePlaylist.parseResult,
-          name = remotePlaylist.parseResult.playlistName,
+          name = name?.trim()?.takeIf { it.isNotBlank() } ?: remotePlaylist.parseResult.playlistName,
           sourceUrl = remotePlaylist.sourceUrl,
           userAgent = userAgent,
         )
@@ -605,6 +606,7 @@ class PlaylistRepository(
     serverUrl: String,
     username: String,
     password: String,
+    name: String? = null,
   ): Result<Long> =
     try {
       val accountUsername = username
@@ -639,7 +641,7 @@ class PlaylistRepository(
                 xtreamEncryptedPassword = encryptedPassword,
               ),
             parseResult = securedPlaylist,
-            name = existing.name,
+            name = name?.trim()?.takeIf { it.isNotBlank() } ?: existing.name,
             userAgent = existing.userAgent,
           )
           Result.success(existing.id.toLong())
@@ -647,7 +649,7 @@ class PlaylistRepository(
           val host = catalog.serverUrl.toHttpUrlOrNull()?.host ?: "Server"
           val playlist =
             PlaylistEntity(
-              name = "Xtream – $host",
+              name = name?.trim()?.takeIf { it.isNotBlank() } ?: "Xtream – $host",
               createdAt = now,
               updatedAt = now,
               isM3uPlaylist = true,

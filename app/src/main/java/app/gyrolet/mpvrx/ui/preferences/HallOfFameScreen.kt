@@ -187,6 +187,12 @@ object HallOfFameScreen : Screen {
                 containerColor = colors.primaryContainer,
               )
               HallOfFamePerson(
+                name = "Ahmad Abdullah Rifat", handle = "ahmadrifat",
+                details = stringResource(R.string.custom_feature_credit),
+                avatarUrl = "https://github.com/ahmadrifat.png", profileUrl = "https://github.com/ahmadrifat",
+                featured = true, accent = colors.onSecondaryContainer, containerColor = colors.secondaryContainer,
+              )
+              HallOfFamePerson(
                 name = "Ritesh Pandit",
                 handle = "Riteshp2001",
                 details = stringResource(R.string.hall_of_fame_maintainer),

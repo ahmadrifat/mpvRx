@@ -1,4 +1,4 @@
-# mpvRx 2.7.2.7
+# mpvRx 2.7.2.8
 
 Based on upstream 0e79b470, with the previous custom source checkpoint preserved in Git.
 
@@ -8,7 +8,7 @@ Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and a
 
 ## Changes
 
-- MAG categories now use the portal's genre names. Playback honors static versus temporary links, refreshes catalog play tokens, supports ffrt2 commands, retains account-scoped session cookies and uses the portal client referer. Refresh existing MAG playlists to update category labels. Version 2.7.2.7 uses Android versionCode 80.
+- MAG categories now use the portal's genre names. Playback honors static versus temporary links, refreshes catalog play tokens, supports ffrt2 commands, retains account-scoped session cookies and uses the portal client referer. Refresh existing MAG playlists to update category labels. Version 2.7.2.8 uses Android versionCode 90.
 
 - Audio/clip download history now retains yt-dlp thumbnail URLs or existing playback artwork, reusing the current Downloads image loader. No web-search service is added.
 - Audio mode now uses Save audio and the audio icon instead of Save clip. Audio failures are labelled Audio export failed.
@@ -17,7 +17,7 @@ Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and a
 
 - Displayed name is now mpvRx; package and signing identity remain unchanged for in-place upgrades.
 - Panel defaults follow the requested screenshots. Video/audio download controls are before More in Top Right and Portrait Bottom. Existing customized selections remain saved; Reset defaults applies the full default panel configuration.
-- Configurable blended headphone/download icon opens the existing millisecond trim editor, defaults to the full duration when known, and saves M4A, MP3, WAV or raw AAC under Music/mpvRx/Clips. M4A is selected initially. Only audio is encoded; extractor sites use separate audio where available. Progress, completion, retry and deletion share Downloads with clips. No video conversion runs for audio exports. Audio mode has no crop controls/information, preserves Start/End labels, and uses outlined format buttons with a tonal fill for the selected format. Live IPTV/HLS/non-seekable network media hide the audio button; finite duration must be known before a full range can be selected. A media item must have an accessible audio track.
+- Configurable blended headphone/download icon opens the existing millisecond trim editor, defaults to the full duration when known, and saves M4A, MP3, WAV or raw AAC under Music/mpvRx. M4A is selected initially. Only audio is encoded; extractor sites use separate audio where available. Progress, completion, retry and deletion share Downloads with clips. No video conversion runs for audio exports. Audio mode has no crop controls/information, preserves Start/End labels, and uses outlined format buttons with a tonal fill for the selected format. Live IPTV/HLS/non-seekable network media hide the audio button; finite duration must be known before a full range can be selected. A media item must have an accessible audio track.
 - M3U imports follow HTTP redirects and detect Xtream get.php credentials at the destination, even if the returned body is an HLS manifest or account error. This enables Xtream catalog, categories and account information after shortened links. Browser/JavaScript/CAPTCHA shorteners are not supported. No provider link was supplied for live verification.
 - Playback buffer limits and live manifest caching have not been changed.
 
@@ -48,7 +48,7 @@ Keep feature changes in separate commits. Fetch upstream and review/merge upstre
 
 ## Verification and limits
 
-See Build-verification-2.7.2.7.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
+Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
 
 Clipping cannot recover past live segments no longer offered by the server, bypass DRM, or promise support for every codec. Encoding is necessary for frame-accurate boundaries that cannot be safely copied. Clip encoding has cancel/retry, not pause/resume. Android force-stop and foreground-service time limits can interrupt work. Offline torrent storage is private and removed when app data is cleared or the app uninstalled.
 
@@ -74,8 +74,14 @@ The M4A timeline is checked for the requested interval. Raw decoding of compress
 
 GitHub repository: https://github.com/ahmadrifat/mpvRx. Customized source is on custom-release; upstream-master retains untouched developer source. The original master branch is preserved. Updates for the custom build use only https://api.github.com/repos/ahmadrifat/mpvRx/releases/latest. Preview channel selection is hidden and ignored for custom builds. Automatic checks are enabled by default; users may disable them and check manually in About. A repository with no published stable release returns no update.
 
-Release versions use upstream major.minor.patch plus our mod revision: 2.7.2.6, followed by 2.7.2.7, or 2.7.3.1 after an upstream version change. Publish each version under its own tag (v2.7.2.6), as a non-draft, non-prerelease GitHub release marked latest, with the signed mpvRx-2.7.2.6-ARM-universal.apk asset. Four numeric components are compared, so revision 10 follows revision 9. Drafts and prereleases are excluded by the latest-release endpoint. Do not publish original-package APKs in these custom releases.
+Release versions use upstream major.minor.patch plus our mod revision: 2.7.2.7, followed by 2.7.2.8, or 2.7.3.1 after an upstream version change. Publish each version under its own tag (v2.7.2.6), as a non-draft, non-prerelease GitHub release marked latest, with the signed mpvRx-2.7.2.6-ARM-universal.apk asset. Four numeric components are compared, so revision 10 follows revision 9. Drafts and prereleases are excluded by the latest-release endpoint. Do not publish original-package APKs in these custom releases.
 
 The public version name is independent of Android's internal versionCode: this initial renamed release uses 70, higher than the previous 2.7.2-cs.6 build's 60. Increase customVersionCode for every subsequent APK; it must keep increasing even when upstream changes or mod revision resets. The universal code is customVersionCode times ten. Use the existing private release key. Publish modified source and third-party notices alongside every APK. Signing keys and local.properties remain private.
 
 Inherited original-build workflows are gated to the author's repository, preventing them from publishing original-package builds in this fork. Custom releases are built and signed locally until a dedicated custom signing workflow is configured.
+
+## Changes in 2.7.2.8
+
+New torrent payloads use `Torrents` beneath the configured Downloads location. Their metadata and resume state remain private. Existing torrent files are not migrated. Completed downloads can be renamed through the app, updating stored paths; stop torrent playback before renaming. Audio exports now use `Music/mpvRx`.
+
+Selectively integrated GitHub-verified upstream commits 85c5dba5 and b2970921. Startup integration retains custom font preparation and clears per-item HTTP headers. Unsigned new commits and merge commits importing those patches were excluded.

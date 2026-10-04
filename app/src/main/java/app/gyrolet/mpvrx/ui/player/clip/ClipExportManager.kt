@@ -284,7 +284,7 @@ object ClipExportManager {
         ContentValues().apply {
           put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
           put(MediaStore.Video.Media.MIME_TYPE, mimeType)
-          put(MediaStore.Video.Media.RELATIVE_PATH, "${mediaDirectory}/mpvRx/Clips")
+          put(MediaStore.Video.Media.RELATIVE_PATH, if (audioOnly) "${mediaDirectory}/mpvRx" else "${mediaDirectory}/mpvRx/Clips")
           put(MediaStore.Video.Media.IS_PENDING, 1)
         }
       val uri =
@@ -312,7 +312,7 @@ object ClipExportManager {
     // storage access, fall back to the app's external Movies directory rather than losing output.
     val publicResult =
       runCatching {
-        val directory = File(Environment.getExternalStoragePublicDirectory(mediaDirectory), "mpvRx/Clips")
+        val directory = File(Environment.getExternalStoragePublicDirectory(mediaDirectory), if (audioOnly) "mpvRx" else "mpvRx/Clips")
         check(directory.exists() || directory.mkdirs()) { "Unable to create the media output folder" }
         val target = uniqueFile(directory, displayName)
         source.copyTo(target)
@@ -323,7 +323,7 @@ object ClipExportManager {
     publicResult.getOrNull()?.let { return it }
 
     val fallbackDirectory =
-      File(context.getExternalFilesDir(mediaDirectory) ?: context.filesDir, "Clips")
+      File(context.getExternalFilesDir(mediaDirectory) ?: context.filesDir, if (audioOnly) "mpvRx" else "Clips")
         .apply { mkdirs() }
     val fallback = uniqueFile(fallbackDirectory, displayName)
     source.copyTo(fallback)

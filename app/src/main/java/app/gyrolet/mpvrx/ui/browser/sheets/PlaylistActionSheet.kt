@@ -65,8 +65,8 @@ fun PlaylistActionSheet(
   onCreatePlaylist: suspend (String) -> Long,
   onCreateM3UPlaylistFromFile: suspend (Uri) -> Result<Long>,
   onCreateZipPlaylist: suspend (Uri) -> Result<Long>,
-  onCreateM3UPlaylist: suspend (String, String?) -> Result<Long>,
-  onCreateXtreamPlaylist: suspend (String, String, String) -> Result<Long>,
+  onCreateM3UPlaylist: suspend (String, String?, String?) -> Result<Long>,
+  onCreateXtreamPlaylist: suspend (String, String, String, String?) -> Result<Long>,
   context: android.content.Context,
   modifier: Modifier = Modifier,
 ) {
@@ -416,6 +416,7 @@ fun PlaylistActionSheet(
 
   // M3U Playlist Dialog
   if (showM3UDialog) {
+    var remotePlaylistName by remember { mutableStateOf("") }
     var playlistUrl by remember { mutableStateOf("") }
     var playlistUserAgent by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
@@ -483,6 +484,7 @@ fun PlaylistActionSheet(
           )
 
           Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(value = remotePlaylistName, onValueChange = { remotePlaylistName = it }, label = { Text(androidx.compose.ui.res.stringResource(app.gyrolet.mpvrx.R.string.custom_playlist_name)) }, singleLine = true, enabled = !isLoading, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
               value = playlistUrl,
               onValueChange = { playlistUrl = it },
@@ -593,6 +595,7 @@ fun PlaylistActionSheet(
                       onCreateM3UPlaylist(
                         normalizedPlaylistUrl,
                         playlistUserAgent.trim().takeIf { it.isNotEmpty() },
+                        remotePlaylistName.trim().takeIf { it.isNotBlank() },
                       )
                     result
                       .onSuccess {

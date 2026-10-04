@@ -109,7 +109,7 @@ object AboutScreen : Screen {
         ?.let { value -> if (BuildConfig.IS_PREVIEW_BUILD) value else value.substringBefore('-') }
         ?: BuildConfig.VERSION_NAME
     val buildType = BuildConfig.BUILD_TYPE
-    val githubRepoUrl = stringResource(R.string.github_repo_url)
+    val githubRepoUrl = "https://github.com/ahmadrifat/mpvRx"
     val settingsScrollState = rememberScrollState()
     val settingsHighlight =
       rememberSettingsSearchHighlight(AboutScreen, settingsScrollState, MaterialTheme.colorScheme.primary)
@@ -256,7 +256,7 @@ object AboutScreen : Screen {
                     Text(
                       text =
                         androidx.compose.ui.res
-                          .stringResource(app.gyrolet.mpvrx.R.string.ui_by_ritesh_pandit),
+                          .stringResource(app.gyrolet.mpvrx.R.string.custom_by_author),
                       modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                       style = MaterialTheme.typography.titleSmall,
                       fontWeight = FontWeight.SemiBold,
@@ -413,97 +413,25 @@ object AboutScreen : Screen {
               color = cs.onSurfaceVariant,
             )
             Spacer(Modifier.height(14.dp))
-            Surface(
-              shape = RoundedCornerShape(12.dp),
-              color = cs.primaryContainer.copy(alpha = 0.4f),
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Row(
-                modifier =
-                  Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                      SafeClipboard.copyPlainText(
-                        context = context,
-                        label = "mpvrx_upi_id",
-                        text = "panditritesh2001@okhdfcbank",
-                        showToast = false,
-                      )
-                      Toast
-                        .makeText(
-                          context,
-                          context.getString(app.gyrolet.mpvrx.R.string.ui_upi_id_copied),
-                          Toast.LENGTH_SHORT,
-                        ).show()
-                    }.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-              ) {
-                Column(modifier = Modifier.weight(1f)) {
-                  Text(
-                    text =
-                      androidx.compose.ui.res
-                        .stringResource(app.gyrolet.mpvrx.R.string.ui_upi_id),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = cs.outline,
-                  )
-                  Spacer(Modifier.height(2.dp))
-                  Text(
-                    text =
-                      androidx.compose.ui.res.stringResource(
-                        app.gyrolet.mpvrx.R.string.ui_panditritesh2001_okhdfcbank,
-                      ),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Medium,
-                    color = cs.onSurface,
-                  )
+            listOf(
+              "USDT BNB Smart Chain (BEP20)" to "0x3a5bac847de3fb559bdf60f8cc02197350b0a008",
+              "USDT Tron (TRC20)" to "TAM4yTYvfrKJQQv73cFaxRxd163VYhv2zo",
+            ).forEach { (network, address) ->
+              Surface(shape = RoundedCornerShape(12.dp), color = cs.primaryContainer.copy(alpha = 0.4f), modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().clickable {
+                  SafeClipboard.copyPlainText(context = context, label = network, text = address, showToast = false)
+                  Toast.makeText(context, R.string.custom_address_copied, Toast.LENGTH_SHORT).show()
+                }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(network, style = MaterialTheme.typography.labelSmall, color = cs.outline)
+                    Spacer(Modifier.height(2.dp))
+                    Text(address, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, color = cs.onSurface)
+                  }
+                  Spacer(Modifier.width(12.dp))
+                  Icon(Icons.RoundedFilled.ContentCopy, stringResource(R.string.custom_copy_address), modifier = Modifier.size(20.dp), tint = cs.primary)
                 }
-                Icon(
-                  imageVector = Icons.RoundedFilled.ContentCopy,
-                  contentDescription =
-                    androidx.compose.ui.res.stringResource(
-                      app.gyrolet.mpvrx.R.string.ui_copy_upi_id,
-                    ),
-                  modifier = Modifier.size(20.dp),
-                  tint = cs.primary,
-                )
               }
-            }
-            Spacer(Modifier.height(12.dp))
-            Button(
-              onClick = {
-                try {
-                  val upiIntent =
-                    Intent(
-                      Intent.ACTION_VIEW,
-                      "upi://pay?pa=panditritesh2001@okhdfcbank&pn=Ritesh%20Pandit&cu=INR".toUri(),
-                    )
-                  context.startActivity(upiIntent)
-                } catch (_: Exception) {
-                  Toast
-                    .makeText(
-                      context,
-                      context.getString(app.gyrolet.mpvrx.R.string.ui_no_upi_app_found),
-                      Toast.LENGTH_SHORT,
-                    ).show()
-                }
-              },
-              modifier = Modifier.fillMaxWidth().height(50.dp),
-              shape = RoundedCornerShape(12.dp),
-              colors =
-                ButtonDefaults.buttonColors(
-                  containerColor = cs.error,
-                  contentColor = cs.onError,
-                ),
-              elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-            ) {
-              Icon(Icons.RoundedFilled.MonetizationOn, null, modifier = Modifier.size(18.dp))
-              Spacer(Modifier.width(8.dp))
-              Text(
-                androidx.compose.ui.res
-                  .stringResource(app.gyrolet.mpvrx.R.string.ui_send_love),
-                fontWeight = FontWeight.SemiBold,
-              )
+              Spacer(Modifier.height(12.dp))
             }
           }
         }

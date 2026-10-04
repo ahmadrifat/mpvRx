@@ -140,6 +140,7 @@ class ClipSmokeInstrumentation : Instrumentation() {
           delayedSource.absolutePath, delayedSource.absolutePath, delayedOutput.absolutePath,
           0.0, 1.0, emptyMap(), {}, {}, app.gyrolet.mpvrx.ui.player.clip.AudioExportFormat.WAV)
         check(delayedError == null) { "Delayed audio: $delayedError" }
+        DownloadRenameSmoke.run(context, source, audioOutput)
         testConcurrentDirectDownloads(context, directory)
         result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; M4A/MP3/WAV/AAC exports, decoded trim checks, M4A 2 ms duration/start checks; audio shorter than video, 219.300 s trim at 44.1 kHz, and delayed-audio timeline regressions")
         onlineSource?.let { url ->

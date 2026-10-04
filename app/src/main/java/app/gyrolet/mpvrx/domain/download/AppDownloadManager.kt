@@ -359,6 +359,13 @@ class AppDownloadManager(
       }.orEmpty()
   }
 
+  suspend fun rename(download: AppDownload, name: String) {
+    require(download.isCompleted) { "Wait for the download to finish" }
+    DownloadFileRename.rename(context, download.file.absolutePath, name, sidecarSubtitles(download)) { path ->
+      dao.update(download.entity.copy(fileName = File(path).name, title = name.substringBeforeLast('.')))
+    }
+  }
+
   fun pause(id: Long) {
     pausedIds.add(id)
     calls[id]?.cancel()

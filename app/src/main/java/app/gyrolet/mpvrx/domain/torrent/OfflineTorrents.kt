@@ -12,7 +12,7 @@ import java.io.File
 
 /** Owns retained downloads independently of the playback engine. */
 object OfflineTorrents {
-  data class Download(val id: String, val source: String, val index: Int, val title: String, val directory: String, val path: String, val size: Long, val downloaded: Long = 0, val status: String = "Paused", val manualBackground: Boolean = false) {
+  data class Download(val id: String, val source: String, val index: Int, val title: String, val directory: String, val path: String, val size: Long, val downloaded: Long = 0, val status: String = "Paused", val manualBackground: Boolean = false, val speedBytesPerSec: Long = 0) {
     val complete get() = downloaded >= size && size > 0 && File(path).isFile && File(path).length() == size
     val progress get() = if (size > 0) (downloaded.toFloat() / size).coerceIn(0f, 1f) else 0f
   }
@@ -21,6 +21,7 @@ object OfflineTorrents {
   private val natives = mutableMapOf<String, Native>()
   private val _downloads = MutableStateFlow<List<Download>>(emptyList())
   val downloads = _downloads.asStateFlow()
+  private val metadataDirectories = mutableMapOf<String, File>()
   private var root: File? = null
   private var monitor: Job? = null
   private var ticks = 0
@@ -37,7 +38,7 @@ object OfflineTorrents {
   }
   @Synchronized fun pause(id: String, reason: String = "Paused") {
     natives[id]?.let { it.handle.saveResumeData(TorrentHandle.SAVE_INFO_DICT); it.handle.pause(); it.paused = true }
-    _downloads.value = _downloads.value.map { if (it.id == id && !it.complete) it.copy(status = reason, manualBackground = false).also(::persist) else it }
+    _downloads.value = _downloads.value.map { if (it.id == id && !it.complete) it.copy(status = reason, manualBackground = false, speedBytesPerSec = 0).also(::persist) else it }
   }
   @Synchronized fun find(source: String, index: Int?): Download? {
     val hash = canonicalInfoHash(source)
@@ -61,7 +62,9 @@ object OfflineTorrents {
     root = File(context.filesDir, "offline_torrents").apply { mkdirs() }
     _downloads.value = root!!.listFiles().orEmpty().filter { it.isDirectory }.flatMap { directory -> directory.listFiles().orEmpty().filter { it.name.startsWith("download-") && it.extension == "json" } }.mapNotNull { record ->
       runCatching {
-        val directory = record.parentFile!!
+        val control = record.parentFile!!
+        val directory = runCatching { File(JSONObject(File(control, "directory.json").readText()).getString("path")) }.getOrDefault(control)
+        metadataDirectories[directory.absolutePath] = control
         val json = JSONObject(record.readText())
         val relative = json.getString("relativePath")
         val media = File(directory, relative).canonicalFile
@@ -73,7 +76,7 @@ object OfflineTorrents {
   @Synchronized
   fun directoryFor(context: Context, source: String): File {
     initialize(context)
-    val previous = _downloads.value.firstOrNull { it.source == source || it.id.substringBefore('-') == canonicalInfoHash(source) || android.net.Uri.parse(source).path == File(it.directory, "source.torrent").absolutePath }
+    val previous = _downloads.value.firstOrNull { it.source == source || it.id.substringBefore('-') == canonicalInfoHash(source) || android.net.Uri.parse(source).path == File(metadataDirectory(File(it.directory)), "source.torrent").absolutePath }
     if (previous != null) {
       val related = _downloads.value.filter { it.directory == previous.directory }
       require(related.none { natives[it.id]?.attached == true }) { "This torrent is already playing" }
@@ -81,7 +84,13 @@ object OfflineTorrents {
       _downloads.value = _downloads.value.map { if (it.directory == previous.directory && !it.complete) it.copy(status = "Paused") else it }
       return File(previous.directory)
     }
-    return File(root, java.util.UUID.randomUUID().toString()).apply { mkdirs() }
+    val token = java.util.UUID.randomUUID().toString()
+    val control = File(root, token).apply { check(mkdirs()) }
+    val locations = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.AppDownloadManager>().locations
+    val directory = File(File(locations.root(), "Torrents"), token).apply { check(exists() || mkdirs()) }
+    File(control, "directory.json").writeText(JSONObject().put("path", directory.absolutePath).toString())
+    metadataDirectories[directory.absolutePath] = control
+    return directory
   }
   @Synchronized
   fun attach(context: Context, result: TorrentStreamResult, directory: File, session: SessionManager, handle: TorrentHandle): String {
@@ -98,8 +107,8 @@ object OfflineTorrents {
         if (alert is org.libtorrent4j.alerts.SaveResumeDataAlert) {
           runCatching {
             val params = alert.params()
-            File(directory, "resume.dat").writeBytes(org.libtorrent4j.AddTorrentParams.writeResumeDataBuf(params))
-            File(directory, "source.torrent").writeBytes(org.libtorrent4j.Entry(org.libtorrent4j.swig.libtorrent.write_torrent_file(params.swig())).bencode())
+            File(metadataDirectory(directory), "resume.dat").writeBytes(org.libtorrent4j.AddTorrentParams.writeResumeDataBuf(params))
+            File(metadataDirectory(directory), "source.torrent").writeBytes(org.libtorrent4j.Entry(org.libtorrent4j.swig.libtorrent.write_torrent_file(params.swig())).bencode())
           }
         }
       }
@@ -136,7 +145,8 @@ object OfflineTorrents {
       try {
         val bytes = native.handle.fileProgress(TorrentHandle.PIECE_GRANULARITY).getOrNull(download.index) ?: 0L
         val done = bytes >= download.size && download.size > 0
-        val updated = download.copy(downloaded = bytes, status = if (done) "Downloaded" else "Downloading")
+        val updated = download.copy(downloaded = bytes, status = if (done) "Downloaded" else "Downloading", speedBytesPerSec = if (done) 0 else native.handle.status().downloadPayloadRate().toLong())
+        if (done && !download.complete) application?.let { app.gyrolet.mpvrx.domain.download.AppDownloadManager.notifyCompletedMedia(it, File(updated.path)) }
         if (updated.downloaded != download.downloaded || updated.status != download.status) persist(updated)
         if (done) {
           native.handle.pause()
@@ -151,11 +161,48 @@ object OfflineTorrents {
   }
   private fun persist(download: Download) {
     val directory = File(download.directory)
-    val json = JSONObject().put("id", download.id).put("source", download.source).put("index", download.index).put("title", download.title).put("relativePath", File(download.path).relativeTo(directory).path).put("size", download.size).put("downloaded", download.downloaded).put("manualBackground", download.manualBackground).put("status", download.status)
-    val target = File(directory, "download-${download.index}.json")
-    val temporary = File(directory, "download-${download.index}.json.tmp")
+    val json = JSONObject().put("id", download.id).put("source", download.source).put("index", download.index).put("title", download.title).put("relativePath", File(download.path).canonicalFile.relativeTo(directory.canonicalFile).path).put("size", download.size).put("downloaded", download.downloaded).put("manualBackground", download.manualBackground).put("status", download.status)
+    val target = File(metadataDirectory(directory), "download-${download.index}.json")
+    val temporary = File(metadataDirectory(directory), "download-${download.index}.json.tmp")
     temporary.writeText(json.toString())
     java.nio.file.Files.move(temporary.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+  }
+  @Synchronized fun metadataDirectory(directory: File): File = metadataDirectories[directory.absolutePath] ?: directory
+
+  suspend fun rename(context: Context, download: Download, name: String) {
+    synchronized(this) {
+      require(download.complete) { "Wait for the download to finish" }
+      require(_downloads.value.none { it.directory == download.directory && natives[it.id]?.attached == true }) { "Stop torrent playback before renaming" }
+      _downloads.value.filter { it.directory == download.directory }.forEach { natives.remove(it.id)?.session?.stop() }
+    }
+    app.gyrolet.mpvrx.domain.download.DownloadFileRename.rename(context, download.path, name) { path ->
+      synchronized(this) {
+        val updated = download.copy(path = path, title = name.substringBeforeLast('.'))
+        // Rebuild storage remappings from persisted records if this torrent is opened again.
+        File(metadataDirectory(File(download.directory)), "resume.dat").delete()
+        persist(updated)
+        _downloads.value = _downloads.value.map { if (it.id == download.id) updated else it }
+      }
+    }
+  }
+
+  suspend fun restoreFileMappings(handle: TorrentHandle, directory: File, info: org.libtorrent4j.TorrentInfo, session: SessionManager) {
+    val renamed = synchronized(this) { _downloads.value.filter { it.directory == directory.absolutePath && info.files().filePath(it.index) != File(it.path).canonicalFile.relativeTo(directory.canonicalFile).path.replace('\\', '/') } }
+    for (download in renamed) {
+      val completion = CompletableDeferred<Unit>()
+      val listener = object : org.libtorrent4j.AlertListener {
+        override fun types() = intArrayOf(org.libtorrent4j.alerts.AlertType.FILE_RENAMED.swig(), org.libtorrent4j.alerts.AlertType.FILE_RENAME_FAILED.swig())
+        override fun alert(alert: org.libtorrent4j.alerts.Alert<*>) {
+          if (alert is org.libtorrent4j.alerts.FileRenamedAlert && alert.index() == download.index) completion.complete(Unit)
+          if (alert is org.libtorrent4j.alerts.FileRenameFailedAlert && alert.getIndex() == download.index) completion.completeExceptionally(IllegalStateException("Could not restore torrent filename"))
+        }
+      }
+      session.addListener(listener)
+      try {
+        handle.renameFile(download.index, File(download.path).canonicalFile.relativeTo(directory.canonicalFile).path.replace('\\', '/'))
+        withTimeout(10_000) { completion.await() }
+      } finally { session.removeListener(listener) }
+    }
   }
   fun resume(context: Context, download: Download) {
     synchronized(this) {
@@ -168,7 +215,7 @@ object OfflineTorrents {
     scope.launch {
       val engine = TorrentStreamingEngine(context)
       try {
-        val metadata = File(download.directory, "source.torrent")
+        val metadata = File(metadataDirectory(File(download.directory)), "source.torrent")
         val source = if (metadata.isFile) android.net.Uri.fromFile(metadata).toString() else download.source
         engine.startStream(TorrentStreamRequest(source, download.index))
         engine.stopStream()
@@ -182,24 +229,27 @@ object OfflineTorrents {
     if (_downloads.value.any { it.id != download.id && it.directory == download.directory && natives[it.id]?.attached == true }) return false
     natives.remove(download.id)?.session?.stop()
     val directory = File(download.directory).canonicalFile
-    require(directory.path.startsWith(root!!.canonicalPath + File.separator))
+    require(metadataDirectory(directory).canonicalPath.startsWith(root!!.canonicalPath + File.separator))
     if (deleteMetadata) {
       val others = _downloads.value.filter { it.directory == download.directory && it.id != download.id }
       if (others.isEmpty()) {
         if (directory.exists() && !directory.deleteRecursively()) return false
+        val control = metadataDirectory(directory)
+        if (control != directory && control.exists() && !control.deleteRecursively()) return false
+        metadataDirectories.remove(directory.absolutePath)
       } else {
         val media = File(download.path).canonicalFile
         require(media.path.startsWith(directory.path + File.separator))
         if (media.exists() && !media.delete()) return false
-        File(directory, "download-${download.index}.json").delete()
-        File(directory, "resume.dat").delete()
+        File(metadataDirectory(directory), "download-${download.index}.json").delete()
+        File(metadataDirectory(directory), "resume.dat").delete()
       }
       _downloads.value = _downloads.value.filterNot { it.id == download.id }
     } else {
       val media = File(download.path).canonicalFile
       require(media.path.startsWith(directory.path + File.separator))
       if (media.exists() && !media.delete()) return false
-      File(directory, "resume.dat").delete()
+      File(metadataDirectory(directory), "resume.dat").delete()
       val updated = download.copy(downloaded = 0, status = "Video deleted — torrent retained")
       persist(updated)
       _downloads.value = _downloads.value.map { if (it.id == download.id) updated else it }

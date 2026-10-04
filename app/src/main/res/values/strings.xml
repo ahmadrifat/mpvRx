@@ -2795,4 +2795,12 @@
   <string name="onboarding_configuration_no_backup">Folder configured. Downloads will use Configuration/Downloads.</string>
   <string name="onboarding_configuration_restored">Restored settings from %1$s. Downloads will use Configuration/Downloads.</string>
   <string name="onboarding_configuration_restore_failed">Folder setup could not be completed: %1$s</string>
+    <string name="custom_playlist_name">Playlist Name</string>
+    <string name="custom_by_author">By Ahmad Abdullah Rifat</string>
+    <string name="custom_feature_credit">mpvRx Custom Feature</string>
+    <string name="custom_address_copied">Address copied</string>
+    <string name="custom_copy_address">Copy address</string>
+    <string name="custom_rename_file">Rename file</string>
+    <string name="custom_filename">File name</string>
+    <string name="custom_rename_failed">Could not rename file: %1$s</string>
 </resources>

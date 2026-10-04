@@ -208,7 +208,7 @@ class TorrentStreamingEngine(
       OfflineTorrents.initialize(appContext)
       val saved = OfflineTorrents.find(request.source, request.fileIndex)
       if (saved?.complete == true) {
-        return@withContext TorrentStreamResult(android.net.Uri.fromFile(java.io.File(saved.path)).toString(), TorrentFileItem(saved.index, java.io.File(saved.path).relativeTo(java.io.File(saved.directory)).path, saved.title, saved.size, "video/*"), saved.source, saved.id.substringBefore('-'), saved.title, listOf(TorrentFileItem(saved.index, java.io.File(saved.path).relativeTo(java.io.File(saved.directory)).path, saved.title, saved.size, "video/*")))
+        return@withContext TorrentStreamResult(android.net.Uri.fromFile(java.io.File(saved.path)).toString(), TorrentFileItem(saved.index, java.io.File(saved.path).canonicalFile.relativeTo(java.io.File(saved.directory).canonicalFile).path, saved.title, saved.size, "video/*"), saved.source, saved.id.substringBefore('-'), saved.title, listOf(TorrentFileItem(saved.index, java.io.File(saved.path).canonicalFile.relativeTo(java.io.File(saved.directory).canonicalFile).path, saved.title, saved.size, "video/*")))
       }
       val startGeneration = generation.incrementAndGet()
       lifecycleMutex.withLock {
@@ -234,7 +234,7 @@ class TorrentStreamingEngine(
           ensureCurrent(startGeneration)
 
           val selectedIndex = request.fileIndex ?: preparedSession.requestedFileIndex
-          val selected =
+          val selectedMetadata =
             when {
               selectedIndex != null ->
                 preparedSession.playableFiles.firstOrNull { it.index == selectedIndex }
@@ -243,6 +243,8 @@ class TorrentStreamingEngine(
               else -> throw streamError("Choose an episode or movie before starting this torrent.")
             }
 
+          val savedFile = OfflineTorrents.downloads.value.firstOrNull { it.directory == preparedSession.cacheDir.absolutePath && it.index == selectedMetadata.index }
+          val selected = savedFile?.let { selectedMetadata.copy(path = File(it.path).canonicalFile.relativeTo(preparedSession.cacheDir.canonicalFile).path, name = File(it.path).name) } ?: selectedMetadata
           configureStreaming(preparedSession.handle, preparedSession.info, selected)
           ensureCurrent(startGeneration)
 
@@ -505,9 +507,10 @@ class TorrentStreamingEngine(
     val priorities = Array(info.files().numFiles()) { Priority.IGNORE }
 
     return monitorTorrentErrors(session) { failure ->
-      val resume = File(cacheDir, "resume.dat").takeIf { it.isFile }
+      val resume = File(OfflineTorrents.metadataDirectory(cacheDir), "resume.dat").takeIf { it.isFile }
       session.download(info, cacheDir, resume, priorities, null, TorrentFlags.SEQUENTIAL_DOWNLOAD)
       val handle = waitForHandle(session, info.infoHash(), startGeneration, failure)
+      OfflineTorrents.restoreFileMappings(handle, cacheDir, info, session)
       endpoints.trackers.forEach { tracker -> handle.addTracker(AnnounceEntry(tracker)) }
       endpoints.webSeeds.forEach(handle::addUrlSeed)
       if (endpoints.trackers.isNotEmpty()) handle.forceReannounce()

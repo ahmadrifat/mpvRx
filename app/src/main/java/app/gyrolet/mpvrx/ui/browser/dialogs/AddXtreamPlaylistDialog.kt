@@ -58,7 +58,7 @@ fun AddXtreamPlaylistDialog(
   isOpen: Boolean,
   onDismiss: () -> Unit,
   onImported: () -> Unit,
-  onCreateXtreamPlaylist: suspend (String, String, String) -> Result<Long>,
+  onCreateXtreamPlaylist: suspend (String, String, String, String?) -> Result<Long>,
 ) {
   if (!isOpen) return
 
@@ -67,6 +67,7 @@ fun AddXtreamPlaylistDialog(
   val client = org.koin.compose.koinInject<app.gyrolet.mpvrx.data.network.XtreamClient>()
   var accountDetails by remember { mutableStateOf<String?>(null) }
   var preferHls by remember { mutableStateOf(true) }
+  var playlistName by remember { mutableStateOf("") }
   var serverUrl by remember { mutableStateOf("") }
   var username by remember { mutableStateOf("") }
   var password by remember { mutableStateOf("") }
@@ -93,7 +94,7 @@ fun AddXtreamPlaylistDialog(
       isLoading = true
       coroutineScope.launch {
         context.getSharedPreferences("custom_iptv", android.content.Context.MODE_PRIVATE).edit().putString(app.gyrolet.mpvrx.data.network.XtreamClient.outputPreferenceKey(serverUrl, username), if (preferHls) "m3u8" else "ts").apply()
-        onCreateXtreamPlaylist(serverUrl.trim(), username, password)
+        onCreateXtreamPlaylist(serverUrl.trim(), username, password, playlistName.trim().takeIf { it.isNotBlank() })
           .onSuccess {
             Toast
               .makeText(context, context.getString(R.string.playlist_xtream_import_success), Toast.LENGTH_SHORT)
@@ -130,6 +131,7 @@ fun AddXtreamPlaylistDialog(
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        OutlinedTextField(value = playlistName, onValueChange = { playlistName = it }, label = { Text(stringResource(R.string.custom_playlist_name)) }, singleLine = true, enabled = !isLoading, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(
           value = serverUrl,
           onValueChange = { serverUrl = it },
