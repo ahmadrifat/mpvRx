@@ -165,7 +165,7 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
 
   private fun resolveSource(info: StreamInfo): String? {
     info.sourceUrl?.let { return it }
-    val result = awaitProxyIo {
+    val result = awaitProxyIo(timeoutSeconds = if (info.stalkerReference != null) 90L else RESOLVE_TIMEOUT_SECONDS) {
       if (info.stalkerReference != null) {
         app.gyrolet.mpvrx.data.network.StalkerPortal.resolve(appContext, info.stalkerReference).map { stream -> info.headers = stream.headers; stream.url }
       } else repository.resolveXtreamStream(requireNotNull(info.reference))
@@ -269,7 +269,7 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
     return contentType.contains("mpegurl", ignoreCase = true) || contentType.contains("m3u8", ignoreCase = true)
   }
 
-  private fun <T> awaitProxyIo(operation: suspend () -> Result<T>): Result<T> {
+  private fun <T> awaitProxyIo(timeoutSeconds: Long = RESOLVE_TIMEOUT_SECONDS, operation: suspend () -> Result<T>): Result<T> {
     val result = AtomicReference<Result<T>?>(null)
     val latch = CountDownLatch(1)
     val job =
@@ -285,7 +285,7 @@ class XtreamStreamingProxy private constructor() : NanoHTTPD("127.0.0.1", 0), Ko
         }
       }
     return try {
-      if (latch.await(RESOLVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+      if (latch.await(timeoutSeconds, TimeUnit.SECONDS)) {
         result.get() ?: Result.failure(IOException("Xtream resolution produced no result"))
       } else {
         job.cancel()

@@ -38,3 +38,13 @@ builds until a dedicated custom workflow is configured.
 mpvRx is originally developed by Ritesh Pandit and contributors. This fork
 retains the AGPL-3.0-or-later license and third-party notices. See
 CUSTOM_BUILD.md and THIRD_PARTY_CLIPPING.md for build and dependency details.
+
+## MAG compatibility update: 2.7.2.7
+
+VersionCode 80 updates version 2.7.2.6 (code 70). Refresh an existing MAG
+playlist after installation to update category labels. The client fetches
+genre names, honors static versus temporary-link flags, refreshes tokenized
+catalog URLs at playback, and retains account-scoped session cookies.
+The opt-in StalkerLiveTest takes MPVRX_TEST_MAG_PORTAL, MPVRX_TEST_MAG_MAC and
+MPVRX_TEST_MAG_CHANNEL from the test process environment; never commit real
+provider credentials or temporary stream URLs to fixtures or release notes.

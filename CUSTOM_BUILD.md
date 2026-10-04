@@ -1,12 +1,14 @@
-# mpvRx 2.7.2.6
+# mpvRx 2.7.2.7
 
 Based on upstream 0e79b470, with the previous custom source checkpoint preserved in Git.
 
 ## Installation
 
-Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.cs. Version code: 70. The package ID changed from .custom to .cs at the user's request. This release installs separately from the earlier custom app and does not automatically transfer its settings/playlists. It coexists with both that app and the author's original app. Subsequent .cs releases with the same signing key can update this installation. An APK with the original package but a different signing certificate cannot update the author's installation.
+Install the ARM universal APK on Android 8 or newer. It includes arm64-v8a and armeabi-v7a for 64-bit and 32-bit phones, including Samsung S23. It does not include x86/x86_64 devices or emulators. All four architectures remain available when building from source. Package: app.gyrolet.mpvrx.cs. Version code: 80. The package ID changed from .custom to .cs at the user's request. This release installs separately from the earlier custom app and does not automatically transfer its settings/playlists. It coexists with both that app and the author's original app. Subsequent .cs releases with the same signing key can update this installation. An APK with the original package but a different signing certificate cannot update the author's installation.
 
 ## Changes
+
+- MAG categories now use the portal's genre names. Playback honors static versus temporary links, refreshes catalog play tokens, supports ffrt2 commands, retains account-scoped session cookies and uses the portal client referer. Refresh existing MAG playlists to update category labels. Version 2.7.2.7 uses Android versionCode 80.
 
 - Audio/clip download history now retains yt-dlp thumbnail URLs or existing playback artwork, reusing the current Downloads image loader. No web-search service is added.
 - Audio mode now uses Save audio and the audio icon instead of Save clip. Audio failures are labelled Audio export failed.
@@ -46,7 +48,7 @@ Keep feature changes in separate commits. Fetch upstream and review/merge upstre
 
 ## Verification and limits
 
-See Build-verification-2.7.2.6.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
+See Build-verification-2.7.2.7.json for the actual checks performed. Live IPTV providers, torrent swarms, platform access rules and Samsung S23 behavior require device testing. MAG support targets conventional MAC-authenticated portals; extra device identity or provider-specific authorization may require adaptations. Availability of expiry and concurrency data depends on the provider.
 
 Clipping cannot recover past live segments no longer offered by the server, bypass DRM, or promise support for every codec. Encoding is necessary for frame-accurate boundaries that cannot be safely copied. Clip encoding has cancel/retry, not pause/resume. Android force-stop and foreground-service time limits can interrupt work. Offline torrent storage is private and removed when app data is cleared or the app uninstalled.
 
