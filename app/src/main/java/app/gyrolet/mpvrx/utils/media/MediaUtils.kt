@@ -219,6 +219,7 @@ object MediaUtils {
     isAudio: Boolean = false,
     playlistDurationsSeconds: List<Int> = emptyList(),
     startPositionSeconds: Double? = null,
+    openDownloadEditor: Boolean = false,
   ) {
     val videoSource = source as? Video
     val localPath =
@@ -264,7 +265,7 @@ object MediaUtils {
         videoSource?.isAudio == true ||
         (localPath?.let { File(it).extension.lowercase() in FileTypeUtils.AUDIO_EXTENSIONS } ?: false)
 
-    if (shouldPlayInMiniPlayerOnly(isAudioMedia)) {
+    if (!openDownloadEditor && shouldPlayInMiniPlayerOnly(isAudioMedia)) {
       val queueItems =
         if (playlist.isNotEmpty()) {
           val selIndex = playlistIndex.coerceIn(playlist.indices)
@@ -320,6 +321,7 @@ object MediaUtils {
     intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     intent.putExtra("internal_launch", true)
+    intent.putExtra("open_download_editor", openDownloadEditor)
     localPath?.let { intent.putExtra("local_media_path", it) }
     if (videoSource != null) {
       intent.putExtra("is_audio", videoSource.isAudio)

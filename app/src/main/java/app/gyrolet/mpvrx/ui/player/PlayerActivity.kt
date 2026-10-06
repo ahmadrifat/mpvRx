@@ -660,6 +660,31 @@ class PlayerActivity :
       }
     }
 
+  private var downloadEditorLaunchJob: kotlinx.coroutines.Job? = null
+
+  private fun requestDownloadEditor(launchIntent: Intent) {
+    if (!launchIntent.getBooleanExtra("open_download_editor", false)) return
+    val source = launchIntent.dataString ?: return
+    launchIntent.removeExtra("open_download_editor")
+    downloadEditorLaunchJob?.cancel()
+    downloadEditorLaunchJob = lifecycleScope.launch {
+      val ready = kotlinx.coroutines.withTimeoutOrNull(60_000) {
+        PlaybackSession.state.first { it.phase == PlaybackPhase.READY && it.currentItem?.originalUri == source }
+      } ?: return@launch
+      // Wait for the player properties used to initialise the full-range editor.
+      repeat(20) { if ((PlaybackSession.getPropertyDouble("duration") ?: 0.0) <= 0 && !PlaybackSession.isLiveForDownload()) delay(100) }
+      if (PlaybackSession.state.value.currentItem?.stableId != ready.currentItem?.stableId) return@launch
+      PlaybackSession.setPropertyBoolean("pause", true)
+      val overlay = app.gyrolet.mpvrx.ui.player.clip.ClipOverlayView.ensureAttached(this@PlayerActivity)
+      val audio = !PlaybackSession.isLiveForDownload() && (PlaybackSession.getPropertyInt("video-params/w") ?: 0) <= 0
+      if (overlay.openClip(audioOnly = audio)) {
+        viewModel.sheetShown.value = Sheets.None
+        viewModel.panelShown.value = Panels.Clip
+        viewModel.hideControls()
+      }
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     applyInitialVideoOrientation(intent)
     enableEdgeToEdge()
@@ -857,6 +882,7 @@ class PlayerActivity :
 
     // Apply persisted shuffle state after playlist is loaded
     viewModel.applyPersistedShuffleState()
+    requestDownloadEditor(intent)
 
     lifecycleScope.launch {
       repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -5485,6 +5511,7 @@ private suspend fun restorePlaybackPosition(state: PlaybackStateEntity?, loadGen
       if (restartForUserScriptChanges(replacement)) return
     }
     handleNewIntent(intent)
+    requestDownloadEditor(intent)
   }
 
   private fun handleNewIntent(sourceIntent: Intent) {

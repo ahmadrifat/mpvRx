@@ -8,7 +8,8 @@ internal object StreamExportAvailability {
     return original.startsWith("mpvrx-stalker:") || original.startsWith("rtsp:") || original.startsWith("rtmp:") ||
       listOf(original, playable).any { source ->
         val path = runCatching { java.net.URI(source).path.orEmpty().lowercase() }.getOrDefault("")
-        path.contains("/live/") || path.substringAfterLast('.') in setOf("hls", "ts", "m3u", "m3u8", "mpd", "ism", "isml")
+        val query = runCatching { java.net.URI(source).rawQuery.orEmpty().lowercase() }.getOrDefault("")
+        path.contains("/live/") || path.endsWith("/live.php") || Regex("(?:^|&)(?:extension|format)=(?:ts|hls|m3u8|m3u|mpd)(?:&|$)").containsMatchIn(query) || path.substringAfterLast('.') in setOf("hls", "ts", "m3u", "m3u8", "mpd", "ism", "isml")
       } || demuxer.orEmpty().lowercase().let { it.contains("hls") || it.contains("mpegts") || it.contains("dash") }
   }
 }

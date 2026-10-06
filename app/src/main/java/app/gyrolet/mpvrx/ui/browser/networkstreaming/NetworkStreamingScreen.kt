@@ -151,7 +151,6 @@ object NetworkStreamingScreen : Screen {
     val ytdlPreferences = koinInject<YtdlPreferences>()
     val bookmarkPreferences = koinInject<NetworkBookmarkPreferences>()
     val wyzieSearchRepository = koinInject<WyzieSearchRepository>()
-    val linkDownloadCoordinator = koinInject<app.gyrolet.mpvrx.domain.download.LinkDownloadCoordinator>()
     val torrentPickerViewModel: TorrentSelectionViewModel =
       viewModel(
         key = "network_torrent_picker",
@@ -505,16 +504,8 @@ object NetworkStreamingScreen : Screen {
                     showTorrentPicker = true
                     torrentPickerViewModel.open(TorrentSelectionInput(source = playableSource, title = entry.fileName))
                   } else {
-                    when (linkDownloadCoordinator.enqueue(playableSource, entry.fileName)) {
-                      app.gyrolet.mpvrx.domain.download.LinkDownloadCoordinator.Route.UNSUPPORTED ->
-                        android.widget.Toast
-                          .makeText(context, R.string.downloads_location_invalid, android.widget.Toast.LENGTH_SHORT)
-                          .show()
-                      else ->
-                        android.widget.Toast
-                          .makeText(context, R.string.downloads_started, android.widget.Toast.LENGTH_SHORT)
-                          .show()
-                    }
+                    MediaUtils.playFile(source = playableSource, context = context, launchSource = "network_download", title = entry.fileName, openDownloadEditor = true)
+
                   }
                 },
                 onDeleteRecent = viewModel::deleteStreamEntry,

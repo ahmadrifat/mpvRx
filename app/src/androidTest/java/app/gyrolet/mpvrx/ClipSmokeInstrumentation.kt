@@ -12,32 +12,67 @@ class ClipSmokeInstrumentation : Instrumentation() {
   private var onlineSource: String? = null
   private var keepFixtures = false
   private var previewUi = false
+  private var recordUi = false
+  private var previewServer: fi.iki.elonen.NanoHTTPD? = null
   override fun onCreate(arguments: Bundle?) {
     super.onCreate(arguments)
     onlineSource = arguments?.getString("onlineSource")
     keepFixtures = arguments?.getString("keepFixtures") == "true"
     previewUi = arguments?.getString("previewUi") == "true"
+    recordUi = arguments?.getString("recordUi") == "true"
     start()
   }
   override fun onStart() {
     val result = Bundle()
     try {
-      if (previewUi) {
+      if (previewUi || recordUi) {
         val context = targetContext
         val preview = File(context.cacheDir, "clip-smoke/preview-ui-${System.nanoTime()}.mp4")
         File(context.cacheDir, "clip-smoke/preview.mp4").copyTo(preview)
+        val preferences = app.gyrolet.mpvrx.preferences.AppearancePreferences(app.gyrolet.mpvrx.preferences.preference.AndroidPreferenceStore(context))
+        val oldPortrait = preferences.portraitBottomControls.get()
+        if (recordUi) preferences.portraitBottomControls.set("DOWNLOAD,MORE_OPTIONS")
+        val source = if (recordUi) {
+          val server = object : fi.iki.elonen.NanoHTTPD("127.0.0.1", 0) {
+            override fun serve(session: IHTTPSession): Response = newFixedLengthResponse(Response.Status.OK, "video/mp4", preview.inputStream(), preview.length())
+          }
+          server.start(); previewServer = server
+          "http://127.0.0.1:${server.listeningPort}/play/live.php?extension=ts"
+        } else android.net.Uri.fromFile(preview).toString()
         val intent = android.content.Intent(context, app.gyrolet.mpvrx.ui.player.PlayerActivity::class.java)
-          .setAction(android.content.Intent.ACTION_VIEW).setDataAndType(android.net.Uri.fromFile(preview), "video/mp4")
+          .setAction(android.content.Intent.ACTION_VIEW).setDataAndType(android.net.Uri.parse(source), "video/mp4")
+          .putExtra("open_download_editor", !recordUi)
           .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         val activity = startActivitySync(intent) as app.gyrolet.mpvrx.ui.player.PlayerActivity
         val deadline = android.os.SystemClock.elapsedRealtime() + 15_000
         while (app.gyrolet.mpvrx.ui.player.PlaybackSession.state.value.phase != app.gyrolet.mpvrx.ui.player.PlaybackPhase.READY ||
-          app.gyrolet.mpvrx.ui.player.PlaybackSession.state.value.currentItem?.originalUri?.endsWith(preview.name) != true) {
+          app.gyrolet.mpvrx.ui.player.PlaybackSession.state.value.currentItem?.originalUri != source) {
           check(android.os.SystemClock.elapsedRealtime() < deadline) { "Preview playback did not become ready" }
           Thread.sleep(100)
         }
+        if (!recordUi) {
+          val editorDeadline = android.os.SystemClock.elapsedRealtime() + 5000
+          while (androidx.lifecycle.ViewModelProvider(activity)[app.gyrolet.mpvrx.ui.player.PlayerViewModel::class.java].panelShown.value != app.gyrolet.mpvrx.ui.player.Panels.Clip) {
+            check(android.os.SystemClock.elapsedRealtime() < editorDeadline) { "Network download did not open the editor automatically" }; Thread.sleep(100)
+          }
+        }
         runOnMainSync { activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
         Thread.sleep(1000)
+        if (recordUi) {
+          runOnMainSync { app.gyrolet.mpvrx.ui.player.PlaybackSession.setPropertyBoolean("pause", true); androidx.lifecycle.ViewModelProvider(activity)[app.gyrolet.mpvrx.ui.player.PlayerViewModel::class.java].showControls() }
+          uiAutomation.waitForIdle(500, 10_000); Thread.sleep(500); uiAutomation.clearCache()
+          fun streamTexts(node: android.view.accessibility.AccessibilityNodeInfo?): List<String> = if (node == null) emptyList() else listOfNotNull(node.text?.toString(), node.contentDescription?.toString()) + (0 until node.childCount).flatMap { streamTexts(node.getChild(it)) }
+          val controls = streamTexts(uiAutomation.rootInActiveWindow)
+          val screenshot = uiAutomation.takeScreenshot()
+          File(context.getExternalFilesDir(null), "stream-controls-preview.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; screenshot.recycle()
+          preferences.portraitBottomControls.set(oldPortrait)
+          check(app.gyrolet.mpvrx.ui.player.PlaybackSession.isLiveForDownload()) { "Query-based TS stream was not recognised" }
+          check("Download" in controls && "Record stream" in controls) { "Stream controls missing: $controls" }
+          check((app.gyrolet.mpvrx.ui.player.PlaybackSession.getPropertyDouble("duration") ?: 0.0) > 0) { "Expected duration-bearing cached source" }
+          previewServer?.stop()
+          result.putString("result", "PASS: saved layout without Record displays both Download and Record for a query-based stream with known duration")
+          finish(android.app.Activity.RESULT_OK, result); return
+        }
         runOnMainSync {
           app.gyrolet.mpvrx.ui.player.PlaybackSession.setPropertyBoolean("pause", true)
           val overlay = app.gyrolet.mpvrx.ui.player.clip.ClipOverlayView.ensureAttached(activity)
@@ -122,7 +157,7 @@ class ClipSmokeInstrumentation : Instrumentation() {
         val audioScreenshot = uiAutomation.takeScreenshot()
         File(context.getExternalFilesDir(null), "download-audio-preview.png").outputStream().use { audioScreenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; audioScreenshot.recycle()
         check(listOf("M4A", "MP3", "WAV", "AAC", "Save audio").all { it in audioLabels } && "Crop" !in audioLabels) { audioLabels.toString() }
-        result.putString("result", "PASS: sticky tabs, tab scroll reset, scrolling format menu, filename cursor selection, thumbnail modes and shared download popup; screenshot=${image.path}")
+        result.putString("result", "PASS: automatic network download editor launch; sticky tabs, tab scroll reset, scrolling format menu, filename cursor selection, thumbnail modes and shared download popup; screenshot=${image.path}")
         finish(android.app.Activity.RESULT_OK, result); return
       }
       runBlocking {
@@ -260,7 +295,8 @@ class ClipSmokeInstrumentation : Instrumentation() {
       }
       finish(android.app.Activity.RESULT_OK, result)
     } catch (error: Throwable) {
-      if (previewUi) runCatching { val screenshot = uiAutomation.takeScreenshot(); File(targetContext.getExternalFilesDir(null), "popup-failure.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; screenshot.recycle() }
+      previewServer?.stop()
+      if (previewUi || recordUi) runCatching { val screenshot = uiAutomation.takeScreenshot(); File(targetContext.getExternalFilesDir(null), "popup-failure.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; screenshot.recycle() }
 
       result.putString("result", "FAIL: ${error.stackTraceToString()}")
       finish(android.app.Activity.RESULT_CANCELED, result)

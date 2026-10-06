@@ -87,3 +87,5 @@ thumbnail source/storage/link buttons around an outlined source field with a
 preview. Choosing Storage commits the new thumbnail only after image selection.
 Streaming source classification is independent of duration/seekability, so
 Download and Record can coexist as streams accumulate buffered playback.
+
+Saved player layouts missing Record now receive a runtime companion beside Download, without replacing configured control positions. Stream detection includes IPTV PHP routes and query format/extension parameters. Recent Stream Links download actions prepare and pause media, then launch the same export editor; no download is enqueued before confirmation.

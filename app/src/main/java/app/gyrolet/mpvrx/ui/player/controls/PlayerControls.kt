@@ -494,12 +494,12 @@ fun PlayerControls(
       val topR = appearancePreferences.parseButtons(topRightControlsPref, usedButtons)
       val bottomR = appearancePreferences.parseButtons(bottomRightControlsPref, usedButtons)
       val bottomL = appearancePreferences.parseButtons(bottomLeftControlsPref, usedButtons)
-      listOf(topR, bottomR, bottomL)
+      app.gyrolet.mpvrx.preferences.PlayerControlLayout.withRecordingCompanion(listOf(topR, bottomR, bottomL))
     }
 
   val portraitBottomButtons =
     remember(portraitBottomControlsPref) {
-      appearancePreferences.parseButtons(portraitBottomControlsPref, mutableSetOf())
+      app.gyrolet.mpvrx.preferences.PlayerControlLayout.withRecordingCompanion(listOf(appearancePreferences.parseButtons(portraitBottomControlsPref, mutableSetOf()))).single()
     }
   val landscapeHasConfiguredQualityButton =
     remember(topRightButtons, bottomRightButtons, bottomLeftButtons) {
