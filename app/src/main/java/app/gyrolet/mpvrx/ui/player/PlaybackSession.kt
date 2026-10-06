@@ -1236,7 +1236,7 @@ object PlaybackSession : MPVLib.EventObserver {
     val item = state.value.currentItem ?: return@withReadyCore false
     val source = item.originalUri
     val network = source.startsWith("http") || source.startsWith("mpvrx-stalker:") || source.startsWith("rtsp:") || source.startsWith("rtmp:")
-    network && !canExportAudio()
+    network && (activeNetworkStream?.hlsProxy != null || app.gyrolet.mpvrx.ui.player.clip.StreamExportAvailability.isStream(source, item.playableUri, MPVLib.getPropertyString("file-format")) || !canExportAudio())
   }
 
   fun canExportAudio(): Boolean = withReadyCore(false) {

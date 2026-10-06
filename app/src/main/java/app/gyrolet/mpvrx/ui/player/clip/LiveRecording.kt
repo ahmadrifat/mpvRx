@@ -42,13 +42,13 @@ object LiveRecording {
           val streams = GlobalContext.get().get<YtdlpDownloadEngine>().resolveForClip(item.originalUri)
           input = streams.video; audio = streams.audio; headers = streams.headers + headers
         }
-        require(input.startsWith("http://") || input.startsWith("https://")) { "This live source cannot be recorded" }
+        require(listOf("http://", "https://", "rtsp://", "rtmp://").any(input::startsWith)) { "This live source cannot be recorded" }
         if (stopRequested) { file.delete(); ClipJobs.update(id, status = "Cancelled"); return@launch }
         val args = buildList {
           addAll(listOf("-hide_banner", "-y", "-progress", "pipe:1", "-nostats"))
           fun source(url: String) {
             addAll(listOf("-rw_timeout", "15000000", "-fflags", "+genpts"))
-            if (headers.isNotEmpty()) addAll(listOf("-headers", headers.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
+            if (url.startsWith("http") && headers.isNotEmpty()) addAll(listOf("-headers", headers.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
             if (url.substringBefore('?').endsWith(".m3u8", true)) addAll(listOf("-live_start_index", "-1"))
             addAll(listOf("-i", url))
           }

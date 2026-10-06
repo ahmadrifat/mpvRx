@@ -778,16 +778,17 @@ fun RenderPlayerButton(
       val live = androidx.compose.runtime.produceState(initialValue = PlaybackSession.isLiveForDownload()) {
         while (true) { value = PlaybackSession.isLiveForDownload(); kotlinx.coroutines.delay(250) }
       }.value
-      if ((button == PlayerButton.RECORD) == live) {
+      val recordButton = button == PlayerButton.RECORD
+      if (button == PlayerButton.DOWNLOAD || live) {
         val clipOverlay = remember(activity) { ClipOverlayView.ensureAttached(activity) }
         val recording by app.gyrolet.mpvrx.ui.player.clip.LiveRecording.state.collectAsState()
         ControlsButton(
-          icon = if (live) { if (recording == null) app.gyrolet.mpvrx.ui.icons.RecordIcons.Record else app.gyrolet.mpvrx.ui.icons.RecordIcons.Stop } else Icons.RoundedFilled.Download,
+          icon = if (recordButton) { if (recording == null) app.gyrolet.mpvrx.ui.icons.RecordIcons.Record else app.gyrolet.mpvrx.ui.icons.RecordIcons.Stop } else Icons.RoundedFilled.Download,
           onClick = {
-            val audio = (PlaybackSession.getPropertyInt("video-params/w") ?: 0) <= 0
-            if (if (live) clipOverlay.openRecording() else clipOverlay.openClip(audioOnly = audio)) onOpenPanel(Panels.Clip)
+            val audio = !live && (PlaybackSession.getPropertyInt("video-params/w") ?: 0) <= 0
+            if (if (recordButton) clipOverlay.openRecording() else clipOverlay.openClip(audioOnly = audio)) onOpenPanel(Panels.Clip)
           },
-          title = if (live) { if (recording == null) "Record stream" else "Stop recording" } else "Download",
+          title = if (recordButton) { if (recording == null) "Record stream" else "Stop recording" } else "Download",
           color = if (hideBackground) controlColor else MaterialTheme.colorScheme.onSurface,
           modifier = Modifier.size(buttonSize),
         )

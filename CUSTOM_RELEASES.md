@@ -80,3 +80,10 @@ height. Download tabs remain fixed, reset the content scroll position, and
 format choices use a height-bounded scrollable menu. Author is always visible;
 thumbnail selection supports source artwork, a local image or an external URL.
 Filename/rename fields wrap long text and preserve cursor selection.
+
+The final popup revision puts the destination above the save actions, preserves
+scroll on active-tab taps, filters missing/null author metadata, and presents
+thumbnail source/storage/link buttons around an outlined source field with a
+preview. Choosing Storage commits the new thumbnail only after image selection.
+Streaming source classification is independent of duration/seekability, so
+Download and Record can coexist as streams accumulate buffered playback.

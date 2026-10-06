@@ -214,7 +214,7 @@ class ClipOverlayView @JvmOverloads constructor(
       val extension = listOfNotNull(rawExtension, titleExtension).firstOrNull { it in setOf("mp4", "mkv", "webm", "mov", "avi", "ts", "m4v") }
         ?: when { demuxer.contains("matroska") -> "mkv"; demuxer.contains("mpegts") -> "ts"; demuxer.contains("avi") -> "avi"; else -> "mp4" }
       val height = PlaybackSession.getPropertyInt("video-params/h") ?: 0
-      options = DownloadExportOptions(fileName = (item?.title ?: "Download").replace(Regex("\\.[A-Za-z0-9]{2,5}$"), ""), author = item?.artist ?: PlaybackSession.getPropertyString("metadata/by-key/artist").orEmpty(), thumbnail = item?.artworkUri, sourceThumbnail = item?.artworkUri, sourceExtension = extension)
+      options = DownloadExportOptions(fileName = (item?.title ?: "Download").replace(Regex("\\.[A-Za-z0-9]{2,5}$"), ""), author = ExportFiles.author(item?.artist, PlaybackSession.getPropertyString("metadata/by-key/artist")), thumbnail = item?.artworkUri, sourceThumbnail = item?.artworkUri, sourceExtension = extension)
       videoFormats = listOf(SourceVideoFormat("${extension.uppercase()}${if (height > 0) " · ${height}p" else " · Source"}", null, extension))
       formatError = null
     }
@@ -267,7 +267,7 @@ class ClipOverlayView @JvmOverloads constructor(
     if (panelState.cropActive) return
     val item = PlaybackSession.state.value.currentItem
     LaunchedEffect(item?.stableId) {
-      if (item != null && (item.originalUri.startsWith("http") || app.gyrolet.mpvrx.ui.player.ytdlp.YtdlpManager.requiresYtdlp(item.originalUri))) {
+      if (item != null && (!PlaybackSession.isLiveForDownload() && (item.originalUri.startsWith("http") || app.gyrolet.mpvrx.ui.player.ytdlp.YtdlpManager.requiresYtdlp(item.originalUri)))) {
         loadingFormats = true
         try {
           val info = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine>().inspectSource(item.originalUri, item.headers)
@@ -289,9 +289,9 @@ class ClipOverlayView @JvmOverloads constructor(
       scrollState = contentScroll,
       tabs = {
         val hasVideo = (PlaybackSession.getPropertyInt("video-params/w") ?: 0) > 0
-        if (hasVideo && PlaybackSession.canExportAudio()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (hasVideo && PlaybackSession.canExportAudio() && !PlaybackSession.isLiveForDownload()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           listOf(false to "Video", true to "Audio").forEach { (audio, label) ->
-            FilledTonalButton(onClick = { audioOnly = audio; refreshDraftUi(); panelScope.launch { contentScroll.scrollTo(0) } }, colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = if (audioOnly == audio) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent), modifier = Modifier.weight(1f)) { Text(label) }
+            FilledTonalButton(onClick = { if (audioOnly != audio) { audioOnly = audio; refreshDraftUi(); panelScope.launch { contentScroll.scrollTo(0) } } }, colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = if (audioOnly == audio) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent), modifier = Modifier.weight(1f)) { Text(label) }
           }
         }
       },
@@ -299,6 +299,7 @@ class ClipOverlayView @JvmOverloads constructor(
       settings = {
         DownloadSettingsFields(options, { options = it })
       },
+      destination = { DownloadDestinationField(options, { options = it }) },
       videoFormatControl = {
         var expanded by remember { mutableStateOf(false) }
         Box(Modifier.weight(1f)) {
@@ -440,7 +441,7 @@ class ClipOverlayView @JvmOverloads constructor(
       return
     }
 
-    val whole = active.startSeconds <= .001 && kotlin.math.abs(end - mediaDurationSeconds()) <= .01
+    val whole = !PlaybackSession.isLiveForDownload() && active.startSeconds <= .001 && kotlin.math.abs(end - mediaDurationSeconds()) <= .01
     val configured = options.copy(fullMedia = whole, directory = options.directory ?: if (!audioOnly) org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.AppDownloadManager>().locations.linksDir().path else null)
     if (!audioOnly && active.crop == null && whole && item.originalUri.startsWith("http")) {
       org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine>().enqueue(
@@ -697,6 +698,7 @@ private fun ClipEditorPanel(
   tabs: @Composable () -> Unit,
   onFormatChange: (AudioExportFormat) -> Unit,
   settings: @Composable () -> Unit,
+  destination: @Composable () -> Unit,
   videoFormatControl: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
   outputDescription: String?,
   saveEnabled: Boolean,
@@ -754,6 +756,7 @@ private fun ClipEditorPanel(
       state = state,
       onFormatChange = onFormatChange,
       settings = settings,
+      destination = destination,
       videoFormatControl = videoFormatControl,
       outputDescription = outputDescription,
       saveEnabled = saveEnabled,
@@ -778,6 +781,7 @@ private fun ClipEditorPanelContent(
   state: ClipPanelState,
   onFormatChange: (AudioExportFormat) -> Unit,
   settings: @Composable () -> Unit,
+  destination: @Composable () -> Unit,
   videoFormatControl: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
   outputDescription: String?,
   saveEnabled: Boolean,
@@ -949,6 +953,7 @@ private fun ClipEditorPanelContent(
         Text(stringResource(R.string.clip_cancel))
       }
     } else {
+      destination()
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

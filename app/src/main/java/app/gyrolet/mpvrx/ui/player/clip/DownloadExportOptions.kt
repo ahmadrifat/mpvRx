@@ -34,6 +34,8 @@ data class DownloadExportOptions(
 data class SourceVideoFormat(val label: String, val selector: String?, val extension: String)
 
 object ExportFiles {
+  fun author(vararg values: String?): String = values.firstNotNullOfOrNull { it?.trim()?.takeIf { text -> text.isNotBlank() && !text.equals("null", true) } }.orEmpty()
+
   suspend fun artwork(context: Context, options: DownloadExportOptions, fallback: String?): String? = try {
     thumbnail(context, if (options.thumbnailMode == "source") options.thumbnail ?: fallback else options.thumbnail)
   } catch (error: kotlinx.coroutines.CancellationException) { throw error }

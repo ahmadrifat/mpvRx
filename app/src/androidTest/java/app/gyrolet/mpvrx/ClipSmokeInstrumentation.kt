@@ -98,21 +98,22 @@ class ClipSmokeInstrumentation : Instrumentation() {
         val videoScreenshot = uiAutomation.takeScreenshot()
         File(context.getExternalFilesDir(null), "download-video-preview.png").outputStream().use { videoScreenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; videoScreenshot.recycle()
         check("Video" in videoLabels && "Audio" in videoLabels) { "Tabs scrolled away" }
+        tap("Video")
+        check("Save video" in texts(uiAutomation.rootInActiveWindow)) { "Active tab tap reset the scroll" }
         tap("Video format ▾")
         check("MP4 · 40p" !in texts(uiAutomation.rootInActiveWindow)) { "Format menu should scroll" }
         repeat(12) { if ("MP4 · 40p" !in texts(uiAutomation.rootInActiveWindow)) { scrollPanel(); uiAutomation.clearCache() } }
         tap("MP4 · 40p")
         tap("Audio")
         check("File name" in texts(uiAutomation.rootInActiveWindow)) { "Tab switch did not return to file name" }
-        tap("Thumbnail: From source ▾")
-        tap("External link")
+        tap("Link")
         check("Thumbnail source" in texts(uiAutomation.rootInActiveWindow))
-        tap("Thumbnail: External link ▾")
-        tap("From storage")
-        check("Browse" in texts(uiAutomation.rootInActiveWindow))
-        tap("Thumbnail: From storage ▾")
-        tap("From source")
-
+        tap("Storage")
+        Thread.sleep(500)
+        uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        Thread.sleep(500); uiAutomation.clearCache()
+        check("Thumbnail source" in texts(uiAutomation.rootInActiveWindow)) { "Cancelled image picker lost the previous settings" }
+        tap("Source")
         uiAutomation.waitForIdle(500, 10_000)
         Thread.sleep(1000)
         repeat(10) { if ("Save audio" !in texts(uiAutomation.rootInActiveWindow)) { scrollPanel(); uiAutomation.clearCache() } }

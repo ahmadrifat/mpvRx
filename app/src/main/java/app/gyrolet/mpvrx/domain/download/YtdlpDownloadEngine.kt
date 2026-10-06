@@ -538,7 +538,7 @@ class YtdlpDownloadEngine(
         val codec = f.optString("vcodec").substringBefore('.').uppercase()
         app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat("${ext.uppercase()} · ${f.optInt("height")}p$fps · $codec", selector, ext)
       }.distinctBy { it.label }.reversed()
-      SourceInfo(json.optString("title").takeIf(String::isNotBlank), json.optString("artist", json.optString("uploader")).takeIf(String::isNotBlank), json.optString("thumbnail").takeIf { it.startsWith("http") }, choices)
+      SourceInfo(json.optString("title").takeIf(String::isNotBlank), app.gyrolet.mpvrx.ui.player.clip.ExportFiles.author(*listOf("artist", "uploader", "channel", "creator").map { json.optString(it) }.toTypedArray()).takeIf(String::isNotBlank), json.optString("thumbnail").takeIf { it.startsWith("http") }, choices)
     } finally { cancellation?.dispose(); if (process.isAlive) process.destroyForcibly() }
   }
 
