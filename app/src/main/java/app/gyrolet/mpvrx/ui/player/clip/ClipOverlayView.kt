@@ -28,6 +28,7 @@ import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -59,6 +61,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -210,7 +214,7 @@ class ClipOverlayView @JvmOverloads constructor(
       val extension = listOfNotNull(rawExtension, titleExtension).firstOrNull { it in setOf("mp4", "mkv", "webm", "mov", "avi", "ts", "m4v") }
         ?: when { demuxer.contains("matroska") -> "mkv"; demuxer.contains("mpegts") -> "ts"; demuxer.contains("avi") -> "avi"; else -> "mp4" }
       val height = PlaybackSession.getPropertyInt("video-params/h") ?: 0
-      options = DownloadExportOptions(fileName = (item?.title ?: "Download").replace(Regex("\\.[A-Za-z0-9]{2,5}$"), ""), author = item?.artist ?: PlaybackSession.getPropertyString("metadata/by-key/artist").orEmpty(), thumbnail = item?.artworkUri, sourceExtension = extension)
+      options = DownloadExportOptions(fileName = (item?.title ?: "Download").replace(Regex("\\.[A-Za-z0-9]{2,5}$"), ""), author = item?.artist ?: PlaybackSession.getPropertyString("metadata/by-key/artist").orEmpty(), thumbnail = item?.artworkUri, sourceThumbnail = item?.artworkUri, sourceExtension = extension)
       videoFormats = listOf(SourceVideoFormat("${extension.uppercase()}${if (height > 0) " · ${height}p" else " · Source"}", null, extension))
       formatError = null
     }
@@ -234,7 +238,7 @@ class ClipOverlayView @JvmOverloads constructor(
       val recording by LiveRecording.state.collectAsState()
       var elapsed by remember { mutableStateOf(0L) }
       LaunchedEffect(recording?.id) { while (recording != null) { elapsed = (System.currentTimeMillis() - recording!!.started) / 1000; kotlinx.coroutines.delay(1000) } }
-      DraggablePanel(header = {
+      DraggablePanel(heightFraction = .8f, header = {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
           AppIcon(if (recording == null) app.gyrolet.mpvrx.ui.icons.RecordIcons.Record else app.gyrolet.mpvrx.ui.icons.RecordIcons.Stop, null, modifier = Modifier.size(22.dp))
           Text("Record stream", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 10.dp))
@@ -271,23 +275,28 @@ class ClipOverlayView @JvmOverloads constructor(
             videoFormats = info.formats
             options = options.copy(formatSelector = info.formats.first().selector, sourceExtension = info.formats.first().extension)
           }
-          options = options.copy(author = options.author.ifBlank { info.author.orEmpty() }, thumbnail = options.thumbnail ?: info.thumbnail)
+          options = options.copy(author = options.author.ifBlank { info.author.orEmpty() }, sourceThumbnail = options.sourceThumbnail ?: info.thumbnail, thumbnail = if (options.thumbnailMode == "source") options.thumbnail ?: info.thumbnail else options.thumbnail)
         } catch (error: kotlinx.coroutines.CancellationException) { throw error }
         catch (_: Exception) { formatError = "Source quality options are unavailable. You can save the current source." }
         finally { loadingFormats = false }
       }
     }
 
+    val contentScroll = rememberScrollState()
+    val panelScope = rememberCoroutineScope()
     ClipEditorPanel(
       state = panelState,
-      onFormatChange = { audioFormat = it; refreshDraftUi() },
-      settings = {
+      scrollState = contentScroll,
+      tabs = {
         val hasVideo = (PlaybackSession.getPropertyInt("video-params/w") ?: 0) > 0
-        if (hasVideo && PlaybackSession.canExportAudio()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (hasVideo && PlaybackSession.canExportAudio()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           listOf(false to "Video", true to "Audio").forEach { (audio, label) ->
-            FilledTonalButton(onClick = { audioOnly = audio; refreshDraftUi() }, colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = if (audioOnly == audio) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent), modifier = Modifier.weight(1f)) { Text(label) }
+            FilledTonalButton(onClick = { audioOnly = audio; refreshDraftUi(); panelScope.launch { contentScroll.scrollTo(0) } }, colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = if (audioOnly == audio) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent), modifier = Modifier.weight(1f)) { Text(label) }
           }
         }
+      },
+      onFormatChange = { audioFormat = it; refreshDraftUi() },
+      settings = {
         DownloadSettingsFields(options, { options = it })
       },
       videoFormatControl = {
@@ -296,7 +305,7 @@ class ClipOverlayView @JvmOverloads constructor(
           OutlinedButton(onClick = { expanded = true }, enabled = !loadingFormats, modifier = Modifier.fillMaxWidth().height(48.dp)) {
             Text(if (loadingFormats) "Loading formats…" else "Video format ▾", maxLines = 1)
           }
-          androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+          androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .5f).dp)) {
             videoFormats.forEach { format -> androidx.compose.material3.DropdownMenuItem(text = { Text(format.label) }, onClick = { options = options.copy(formatSelector = format.selector, sourceExtension = format.extension); expanded = false }) }
           }
         }
@@ -684,6 +693,8 @@ class ClipOverlayView @JvmOverloads constructor(
 @Composable
 private fun ClipEditorPanel(
   state: ClipPanelState,
+  scrollState: androidx.compose.foundation.ScrollState,
+  tabs: @Composable () -> Unit,
   onFormatChange: (AudioExportFormat) -> Unit,
   settings: @Composable () -> Unit,
   videoFormatControl: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
@@ -703,7 +714,10 @@ private fun ClipEditorPanel(
   BackHandler(onBack = onCancel)
 
   DraggablePanel(
+    heightFraction = .8f,
+    scrollState = scrollState,
     header = {
+      Column {
       Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier =
@@ -731,6 +745,8 @@ private fun ClipEditorPanel(
             modifier = Modifier.size(24.dp),
           )
         }
+      }
+      tabs()
       }
     },
   ) {

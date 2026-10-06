@@ -36,11 +36,17 @@ class ClipSmokeInstrumentation : Instrumentation() {
           check(android.os.SystemClock.elapsedRealtime() < deadline) { "Preview playback did not become ready" }
           Thread.sleep(100)
         }
-        Thread.sleep(700)
+        runOnMainSync { activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+        Thread.sleep(1000)
         runOnMainSync {
           app.gyrolet.mpvrx.ui.player.PlaybackSession.setPropertyBoolean("pause", true)
           val overlay = app.gyrolet.mpvrx.ui.player.clip.ClipOverlayView.ensureAttached(activity)
           check(overlay.openClip())
+          val field = overlay.javaClass.getDeclaredField("videoFormats\$delegate").apply { isAccessible = true }
+          @Suppress("UNCHECKED_CAST")
+          val formats = field.get(overlay) as androidx.compose.runtime.MutableState<List<app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat>>
+          formats.value = (1..40).map { app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat("MP4 · ${it}p", "test-$it", "mp4") }
+
           val model = androidx.lifecycle.ViewModelProvider(activity)[app.gyrolet.mpvrx.ui.player.PlayerViewModel::class.java]
           model.panelShown.value = app.gyrolet.mpvrx.ui.player.Panels.Clip
           model.hideControls()
@@ -54,6 +60,17 @@ class ClipSmokeInstrumentation : Instrumentation() {
         val image = File(context.getExternalFilesDir(null), "download-popup-preview.png")
         image.outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; screenshot.recycle()
         check("Video" in labels && "Audio" in labels && "Download" in labels) { "${app.gyrolet.mpvrx.ui.player.PlaybackSession.state.value.phase}; panel=${androidx.lifecycle.ViewModelProvider(activity)[app.gyrolet.mpvrx.ui.player.PlayerViewModel::class.java].panelShown.value}; finishing=${activity.isFinishing}; destroyed=${activity.isDestroyed}: $labels" }
+        fun findText(node: android.view.accessibility.AccessibilityNodeInfo?, text: String): android.view.accessibility.AccessibilityNodeInfo? {
+          if (node == null || node.text?.toString() == text) return node
+          return (0 until node.childCount).firstNotNullOfOrNull { findText(node.getChild(it), text) }
+        }
+        fun tap(text: String) {
+          uiAutomation.clearCache()
+          var node = findText(uiAutomation.rootInActiveWindow, text)
+          while (node != null && !node.isClickable) node = node.parent
+          check(node?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true) { "Could not tap $text: ${texts(uiAutomation.rootInActiveWindow)}" }
+          uiAutomation.waitForIdle(300, 5000); Thread.sleep(500); uiAutomation.clearCache()
+        }
         fun scrollables(node: android.view.accessibility.AccessibilityNodeInfo?): List<android.view.accessibility.AccessibilityNodeInfo> =
           if (node == null) emptyList() else (if (node.isScrollable) listOf(node) else emptyList()) + (0 until node.childCount).flatMap { scrollables(node.getChild(it)) }
         fun scrollPanel() {
@@ -63,21 +80,48 @@ class ClipSmokeInstrumentation : Instrumentation() {
           node?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
           Thread.sleep(350)
         }
+        fun editable(node: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+          if (node == null || node.isEditable) return node
+          return (0 until node.childCount).firstNotNullOfOrNull { editable(node.getChild(it)) }
+        }
+        val longName = "A long video file name with several words that should wrap instead of hiding the cursor"
+        check(editable(uiAutomation.rootInActiveWindow)?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
+          Bundle().apply { putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, longName) }) == true)
+        Thread.sleep(300); uiAutomation.clearCache()
+        check(editable(uiAutomation.rootInActiveWindow)?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
+          Bundle().apply { putInt(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 9); putInt(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, 9) }) == true)
+        Thread.sleep(300); uiAutomation.clearCache()
+        check(editable(uiAutomation.rootInActiveWindow)?.textSelectionStart == 9) { "Filename cursor selection was reset" }
         var videoLabels = texts(uiAutomation.rootInActiveWindow)
         repeat(10) { if ("Video format ▾" !in videoLabels || "Save video" !in videoLabels) { scrollPanel(); uiAutomation.clearCache(); videoLabels = texts(uiAutomation.rootInActiveWindow) } }
         check("Video format ▾" in videoLabels && "Crop" in videoLabels && "Save video" in videoLabels) { videoLabels.toString() }
         val videoScreenshot = uiAutomation.takeScreenshot()
         File(context.getExternalFilesDir(null), "download-video-preview.png").outputStream().use { videoScreenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; videoScreenshot.recycle()
-        runOnMainSync { check(app.gyrolet.mpvrx.ui.player.clip.ClipOverlayView.ensureAttached(activity).openClip(audioOnly = true)) }
+        check("Video" in videoLabels && "Audio" in videoLabels) { "Tabs scrolled away" }
+        tap("Video format ▾")
+        check("MP4 · 40p" !in texts(uiAutomation.rootInActiveWindow)) { "Format menu should scroll" }
+        repeat(12) { if ("MP4 · 40p" !in texts(uiAutomation.rootInActiveWindow)) { scrollPanel(); uiAutomation.clearCache() } }
+        tap("MP4 · 40p")
+        tap("Audio")
+        check("File name" in texts(uiAutomation.rootInActiveWindow)) { "Tab switch did not return to file name" }
+        tap("Thumbnail: From source ▾")
+        tap("External link")
+        check("Thumbnail source" in texts(uiAutomation.rootInActiveWindow))
+        tap("Thumbnail: External link ▾")
+        tap("From storage")
+        check("Browse" in texts(uiAutomation.rootInActiveWindow))
+        tap("Thumbnail: From storage ▾")
+        tap("From source")
+
         uiAutomation.waitForIdle(500, 10_000)
         Thread.sleep(1000)
-        repeat(3) { scrollPanel() }
+        repeat(10) { if ("Save audio" !in texts(uiAutomation.rootInActiveWindow)) { scrollPanel(); uiAutomation.clearCache() } }
         uiAutomation.clearCache()
         val audioLabels = texts(uiAutomation.rootInActiveWindow)
         val audioScreenshot = uiAutomation.takeScreenshot()
         File(context.getExternalFilesDir(null), "download-audio-preview.png").outputStream().use { audioScreenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; audioScreenshot.recycle()
         check(listOf("M4A", "MP3", "WAV", "AAC", "Save audio").all { it in audioLabels } && "Crop" !in audioLabels) { audioLabels.toString() }
-        result.putString("result", "PASS: shared download popup tabs; screenshot=${image.path}")
+        result.putString("result", "PASS: sticky tabs, tab scroll reset, scrolling format menu, filename cursor selection, thumbnail modes and shared download popup; screenshot=${image.path}")
         finish(android.app.Activity.RESULT_OK, result); return
       }
       runBlocking {
@@ -215,6 +259,8 @@ class ClipSmokeInstrumentation : Instrumentation() {
       }
       finish(android.app.Activity.RESULT_OK, result)
     } catch (error: Throwable) {
+      if (previewUi) runCatching { val screenshot = uiAutomation.takeScreenshot(); File(targetContext.getExternalFilesDir(null), "popup-failure.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; screenshot.recycle() }
+
       result.putString("result", "FAIL: ${error.stackTraceToString()}")
       finish(android.app.Activity.RESULT_CANCELED, result)
     }

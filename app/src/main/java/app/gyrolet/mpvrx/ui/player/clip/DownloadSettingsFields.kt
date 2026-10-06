@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -25,8 +26,7 @@ internal fun DownloadSettingsFields(options: DownloadExportOptions, onChange: (D
   val context = LocalContext.current
   val manager = koinInject<AppDownloadManager>()
   val scope = rememberCoroutineScope()
-  var showThumbnail by remember { mutableStateOf(false) }
-  var advanced by remember { mutableStateOf(false) }
+  var thumbnailMenu by remember { mutableStateOf(false) }
   val folderPicker = rememberLauncherForActivityResult(LocalFolderPicker()) { uri ->
     if (uri != null) {
       val path = manager.locations.localFolder(uri)
@@ -37,30 +37,50 @@ internal fun DownloadSettingsFields(options: DownloadExportOptions, onChange: (D
       }
     }
   }
-  val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+  val imagePicker = rememberLauncherForActivityResult(object : ActivityResultContracts.GetContent() {
+    override fun createIntent(context: android.content.Context, input: String) = super.createIntent(context, input).putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+  }) { uri ->
     uri?.let { scope.launch {
-      try { onChange(options.copy(thumbnail = ExportFiles.thumbnail(context, it.toString()), thumbnailCustom = true)) }
+      try { onChange(options.copy(thumbnail = ExportFiles.thumbnail(context, it.toString()), thumbnailCustom = true, thumbnailMode = "storage", thumbnailSource = it.toString())) }
       catch (error: kotlinx.coroutines.CancellationException) { throw error }
       catch (_: Exception) { Toast.makeText(context, "Could not read the selected image", Toast.LENGTH_SHORT).show() }
     } }
   }
   Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    OutlinedTextField(value = options.fileName, onValueChange = { onChange(options.copy(fileName = it)) }, label = { Text("File name") }, singleLine = true, enabled = !locked, modifier = Modifier.fillMaxWidth())
+    app.gyrolet.mpvrx.presentation.components.EditableFileName(value = options.fileName, onValueChange = { onChange(options.copy(fileName = it)) }, label = "File name", enabled = !locked, modifier = Modifier.fillMaxWidth())
     OutlinedButton(onClick = { folderPicker.launch(null) }, enabled = !locked, modifier = Modifier.fillMaxWidth()) {
       Text("Save location: ${options.directory ?: "Default"}", maxLines = 2)
     }
     if (!locked && options.directory != null) TextButton(onClick = { onChange(options.copy(directory = null)) }) { Text("Use default location") }
-    if (!locked && !recording) TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide author and thumbnail ▴" else "Author and thumbnail ▾") }
-    if (!locked && !recording && advanced) {
-      OutlinedTextField(value = options.author, onValueChange = { onChange(options.copy(author = it)) }, label = { Text("Author / Artist (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { showThumbnail = !showThumbnail }, modifier = Modifier.weight(1f)) { Text("Thumbnail") }
-        OutlinedButton(onClick = { imagePicker.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("Choose image") }
+    if (!recording) {
+      OutlinedTextField(value = options.author, onValueChange = { onChange(options.copy(author = it)) }, label = { Text("Author (optional)") }, enabled = !locked, modifier = Modifier.fillMaxWidth(), maxLines = 3)
+      Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { thumbnailMenu = true }, enabled = !locked, modifier = Modifier.fillMaxWidth()) {
+          Text("Thumbnail: ${when (options.thumbnailMode) { "storage" -> "From storage"; "link" -> "External link"; else -> "From source" }} ▾")
+        }
+        DropdownMenu(expanded = thumbnailMenu, onDismissRequest = { thumbnailMenu = false }) {
+          listOf("source" to "From source", "storage" to "From storage", "link" to "External link").forEach { (mode, label) ->
+            DropdownMenuItem(text = { Text(label) }, onClick = {
+              thumbnailMenu = false
+              if (mode != options.thumbnailMode) onChange(options.copy(thumbnailMode = mode,
+                thumbnail = if (mode == "source") options.sourceThumbnail else null,
+                thumbnailCustom = mode != "source", thumbnailSource = null))
+            })
+          }
+        }
       }
-      if (showThumbnail) {
-        options.thumbnail?.takeIf(String::isNotBlank)?.let { image -> app.gyrolet.mpvrx.presentation.components.RemoteImage(image, "Selected thumbnail", modifier = Modifier.fillMaxWidth().height(100.dp)) }
-        OutlinedTextField(value = options.thumbnail.orEmpty(), onValueChange = { onChange(options.copy(thumbnail = it.takeIf(String::isNotBlank), thumbnailCustom = true)) }, label = { Text("Thumbnail URL or selected image") }, modifier = Modifier.fillMaxWidth(), maxLines = 2)
-        Text("The thumbnail is kept in Downloads. Cover art is embedded in supported formats.", style = MaterialTheme.typography.bodySmall)
+      if (options.thumbnailMode == "storage") {
+        Box(Modifier.fillMaxWidth().clickable(enabled = !locked) { imagePicker.launch("image/*") }) {
+          OutlinedTextField(value = options.thumbnailSource.orEmpty(), onValueChange = {}, enabled = false,
+            label = { Text("Thumbnail source") }, placeholder = { Text("Select an image from storage") }, modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(disabledTextColor = MaterialTheme.colorScheme.onSurface,
+              disabledBorderColor = MaterialTheme.colorScheme.outline, disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+              disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant),
+            trailingIcon = { Text("Browse", modifier = Modifier.padding(end = 12.dp), color = MaterialTheme.colorScheme.primary) }, maxLines = 3)
+        }
+      } else if (options.thumbnailMode == "link") {
+        OutlinedTextField(value = options.thumbnail.orEmpty(), onValueChange = { onChange(options.copy(thumbnail = it.takeIf(String::isNotBlank), thumbnailCustom = true, thumbnailSource = it)) },
+          label = { Text("Thumbnail source") }, placeholder = { Text("Image URL") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
       }
     }
   }

@@ -22,6 +22,9 @@ data class DownloadExportOptions(
   val directory: String? = null,
   val thumbnail: String? = null,
   val thumbnailCustom: Boolean = false,
+  val thumbnailMode: String = "source",
+  val thumbnailSource: String? = null,
+  val sourceThumbnail: String? = null,
   val formatSelector: String? = null,
   val sourceExtension: String = "mp4",
   val fullMedia: Boolean = false,
@@ -32,7 +35,7 @@ data class SourceVideoFormat(val label: String, val selector: String?, val exten
 
 object ExportFiles {
   suspend fun artwork(context: Context, options: DownloadExportOptions, fallback: String?): String? = try {
-    thumbnail(context, options.thumbnail ?: fallback)
+    thumbnail(context, if (options.thumbnailMode == "source") options.thumbnail ?: fallback else options.thumbnail)
   } catch (error: kotlinx.coroutines.CancellationException) { throw error }
     catch (error: Exception) { if (options.thumbnailCustom) throw error else null }
 

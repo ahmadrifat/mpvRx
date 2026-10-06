@@ -69,6 +69,8 @@ fun DraggablePanel(
   tonalElevation: Dp = 0.dp,
   shadowElevation: Dp = 0.dp,
   border: BorderStroke? = null,
+  heightFraction: Float? = null,
+  scrollState: androidx.compose.foundation.ScrollState? = null,
   content: @Composable () -> Unit,
 ) {
   var offsetX by remember { mutableFloatStateOf(0f) }
@@ -93,7 +95,7 @@ fun DraggablePanel(
     val minOffset = -initialLeft.toFloat()
     val maxOffset = (freeSpace - initialLeft).toFloat()
 
-    val panelHeight = if (isPortrait) (configuration.screenHeightDp.dp * 0.5f).coerceAtMost(maxHeight) else maxHeight
+    val panelHeight = if (heightFraction != null) maxHeight * heightFraction.coerceIn(0.1f, 1f) else if (isPortrait) (configuration.screenHeightDp.dp * 0.5f).coerceAtMost(maxHeight) else maxHeight
 
     val colors = panelCardsColors()
     Surface(
@@ -135,7 +137,7 @@ fun DraggablePanel(
 
         // Scrollable content
         Column(
-          modifier = Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()),
+          modifier = Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(scrollState ?: rememberScrollState()),
         ) {
           content()
         }

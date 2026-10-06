@@ -320,7 +320,7 @@ object DownloadsScreen : Screen {
       AlertDialog(
         onDismissRequest = { if (!renaming) renameTarget = null },
         title = { Text(stringResource(R.string.custom_rename_file)) },
-        text = { OutlinedTextField(value = renameName, onValueChange = { renameName = it }, label = { Text(stringResource(R.string.custom_filename)) }, singleLine = true, enabled = !renaming) },
+        text = { app.gyrolet.mpvrx.presentation.components.EditableFileName(value = renameName, onValueChange = { renameName = it }, label = stringResource(R.string.custom_filename), enabled = !renaming) },
         confirmButton = { TextButton(enabled = !renaming && renameName.isNotBlank(), onClick = {
           renaming = true
           renameScope.launch {

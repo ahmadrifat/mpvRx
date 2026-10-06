@@ -71,3 +71,12 @@ output. Source quality selection is input selection, not a promise to retain
 the source codec after precision/crop processing. The popup displays this.
 Clips/audio exports support cancellation and retry; their processing does not
 support pause/resume. Ordinary yt-dlp downloads retain pause/resume support.
+
+### 2.7.2.9 popup revision
+
+The existing release is refreshed in place without changing its displayed
+version or package/signing identity. Download/record panels use 80% of available
+height. Download tabs remain fixed, reset the content scroll position, and
+format choices use a height-bounded scrollable menu. Author is always visible;
+thumbnail selection supports source artwork, a local image or an external URL.
+Filename/rename fields wrap long text and preserve cursor selection.
