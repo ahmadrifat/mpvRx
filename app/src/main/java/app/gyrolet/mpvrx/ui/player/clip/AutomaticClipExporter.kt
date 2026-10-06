@@ -14,7 +14,7 @@ import java.io.File
 import org.koin.core.context.GlobalContext
 
 internal object AutomaticClipExporter {
-  suspend fun export(context: Context, source: String, original: String, output: String, start: Double, end: Double, crop: ClipCrop?, frameWidth: Int, frameHeight: Int, headers: Map<String, String>, onProgress: (Double) -> Unit, onStage: (String) -> Unit, onThumbnail: (String?) -> Unit = {}): String? {
+  suspend fun export(context: Context, source: String, original: String, output: String, start: Double, end: Double, crop: ClipCrop?, frameWidth: Int, frameHeight: Int, headers: Map<String, String>, onProgress: (Double) -> Unit, onStage: (String) -> Unit, onThumbnail: (String?) -> Unit = {}, formatSelector: String? = null): String? {
     onStage("Preparing")
     var acquired: File? = null
     var effective = source
@@ -24,7 +24,7 @@ internal object AutomaticClipExporter {
     try {
       val extractorSite = (original.startsWith("http://") || original.startsWith("https://")) && YtdlpManager.requiresYtdlp(original)
       if (extractorSite && (source.startsWith("http") || source.startsWith("edl://"))) {
-        val streams = GlobalContext.get().get<YtdlpDownloadEngine>().resolveForClip(original)
+        val streams = GlobalContext.get().get<YtdlpDownloadEngine>().resolveForClip(original, formatSelector = formatSelector)
         onThumbnail(streams.thumbnail)
         effective = streams.video
         audio = streams.audio
@@ -60,7 +60,10 @@ internal object AutomaticClipExporter {
         // prevents encoder timestamp rounding from retaining that extra boundary frame.
         val duration = "%.6f".format(java.util.Locale.US, end - start)
         val videoFilters = mutableListOf("trim=start=0:end=$duration")
-        if (crop != null) videoFilters.add("crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}")
+        if (crop != null) {
+          if (frameWidth > 0 && frameHeight > 0) videoFilters.add("crop=w=trunc(iw*${crop.width}/$frameWidth/2)*2:h=trunc(ih*${crop.height}/$frameHeight/2)*2:x=iw*${crop.x}/$frameWidth:y=ih*${crop.y}/$frameHeight")
+          else videoFilters.add("crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}")
+        }
         addAll(listOf("-vf", videoFilters.joinToString(","), "-af", "atrim=start=0:end=$duration"))
         addAll(listOf("-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-fps_mode", "passthrough", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", output))
       }
@@ -69,8 +72,8 @@ internal object AutomaticClipExporter {
       }
       if (result.first != 0 && extracted) {
         onStage("Downloading")
-        acquired = GlobalContext.get().get<YtdlpDownloadEngine>().acquireForClip(original) { onProgress(it / 100.0) }
-        return export(context, acquired.absolutePath, original, output, start, end, crop, frameWidth, frameHeight, headers, onProgress, onStage)
+        acquired = GlobalContext.get().get<YtdlpDownloadEngine>().acquireForClip(original, formatSelector) { onProgress(it / 100.0) }
+        return export(context, acquired.absolutePath, original, output, start, end, crop, frameWidth, frameHeight, headers, onProgress, onStage, onThumbnail, formatSelector)
       }
       if (result.first != 0) return "Could not clip this video: " + result.second.lineSequence().filter { it.isNotBlank() }.toList().takeLast(3).joinToString(" ").replace(Regex("https?://[^\\s]+"), "[source]").take(240)
       if (!validate(context, output, end - start, expectedFrames)) return "The exported clip did not pass timestamp validation"

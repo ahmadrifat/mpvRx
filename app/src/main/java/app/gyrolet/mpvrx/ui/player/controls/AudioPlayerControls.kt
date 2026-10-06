@@ -1305,6 +1305,24 @@ fun AudioPlayerControls(
           modifier = Modifier.align(Alignment.CenterEnd),
           verticalAlignment = Alignment.CenterVertically,
         ) {
+          val live = produceState(initialValue = PlaybackSession.isLiveForDownload()) {
+            while (true) { value = PlaybackSession.isLiveForDownload(); kotlinx.coroutines.delay(250) }
+          }.value
+          val recording by app.gyrolet.mpvrx.ui.player.clip.LiveRecording.state.collectAsState()
+          ReactiveIconButton(onClick = {
+            val activity = context as? PlayerActivity
+            if (activity != null) {
+              val overlay = app.gyrolet.mpvrx.ui.player.clip.ClipOverlayView.ensureAttached(activity)
+              if (if (live) overlay.openRecording() else overlay.openClip(audioOnly = true)) onOpenPanel(Panels.Clip)
+            }
+          }) {
+            Icon(
+              imageVector = if (live) { if (recording == null) app.gyrolet.mpvrx.ui.icons.RecordIcons.Record else app.gyrolet.mpvrx.ui.icons.RecordIcons.Stop } else Icons.RoundedFilled.Download,
+              contentDescription = if (live) "Record stream" else "Download",
+              tint = MaterialTheme.colorScheme.onSurface,
+              modifier = Modifier.size(28.dp),
+            )
+          }
           ReactiveIconButton(onClick = { onOpenSheet(Sheets.AudioProperties) }) {
             Icon(
               imageVector = Icons.RoundedFilled.Info,

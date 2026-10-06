@@ -18,7 +18,7 @@ import java.util.Locale
 internal object AudioClipExporter {
   suspend fun export(context: Context, source: String, original: String, output: String,
     start: Double, end: Double, headers: Map<String, String>,
-    onProgress: (Double) -> Unit, onStage: (String) -> Unit, format: AudioExportFormat = AudioExportFormat.M4A, onThumbnail: (String?) -> Unit = {}): String? {
+    onProgress: (Double) -> Unit, onStage: (String) -> Unit, format: AudioExportFormat = AudioExportFormat.M4A, onThumbnail: (String?) -> Unit = {}, fullMedia: Boolean = false): String? {
     var copiedInput: File? = null
     try {
       onStage("Preparing")
@@ -43,18 +43,32 @@ internal object AudioClipExporter {
         input = copy.absolutePath
       }
       val duration = "%.6f".format(Locale.US, end - start)
+      val original = if (fullMedia && start == 0.0) FfmpegRuntime.run(context, buildList {
+        addAll(listOf("-v", "error"))
+        if (input.startsWith("http") && requestHeaders.isNotEmpty()) addAll(listOf("-headers", requestHeaders.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
+        addAll(listOf("-select_streams", "a:0", "-show_entries", "stream=codec_name,profile,start_time,duration", "-of", "json", input))
+      }, probe = true) else null
+      val originalTrack = original?.takeIf { it.first == 0 }?.let { runCatching { org.json.JSONObject(it.second).optJSONArray("streams")?.optJSONObject(0) }.getOrNull() }
+      val expectedCodec = when (format) { AudioExportFormat.M4A, AudioExportFormat.AAC -> "aac"; AudioExportFormat.MP3 -> "mp3"; AudioExportFormat.WAV -> "pcm_s16le" }
+      val copyAudio = originalTrack?.optString("codec_name") == expectedCodec &&
+        (format != AudioExportFormat.AAC || originalTrack?.optString("profile") == "LC") &&
+        originalTrack?.optString("duration")?.toDoubleOrNull()?.let { kotlin.math.abs(it - (end - start)) < .03 } == true &&
+        originalTrack?.optString("start_time")?.toDoubleOrNull()?.let { kotlin.math.abs(it) < .002 } == true
       val args = buildList {
         addAll(listOf("-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"))
         if (input.startsWith("http") && requestHeaders.isNotEmpty()) {
           addAll(listOf("-headers", requestHeaders.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
         }
-        addAll(listOf("-ss", "%.6f".format(Locale.US, start), "-i", input,
-          "-t", duration, "-map", "0:a:0", "-vn", "-sn", "-dn",
+        if (!copyAudio) addAll(listOf("-ss", "%.6f".format(Locale.US, start)))
+        addAll(listOf("-i", input))
+        if (!copyAudio) addAll(listOf("-t", duration))
+        addAll(listOf("-map", "0:a:0", "-vn", "-sn", "-dn"))
+        if (copyAudio) addAll(listOf("-c:a", "copy")) else addAll(listOf(
           // Audio tracks may start later or end earlier than the video timeline.
           // Preserve that timeline with silence, rather than rejecting an otherwise valid cut.
           "-af", "aresample=async=1:first_pts=0,apad=whole_dur=$duration,atrim=start=0:end=$duration,asetpts=PTS-STARTPTS",
           "-c:a", format.encoder))
-        if (format != AudioExportFormat.WAV) addAll(listOf("-b:a", "192k"))
+        if (!copyAudio && format != AudioExportFormat.WAV) addAll(listOf("-b:a", "192k"))
         if (format == AudioExportFormat.M4A) addAll(listOf("-movflags", "+faststart"))
         if (format == AudioExportFormat.AAC) addAll(listOf("-f", "adts"))
         add(output)

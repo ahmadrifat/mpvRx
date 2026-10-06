@@ -11,15 +11,75 @@ import java.io.File
 class ClipSmokeInstrumentation : Instrumentation() {
   private var onlineSource: String? = null
   private var keepFixtures = false
+  private var previewUi = false
   override fun onCreate(arguments: Bundle?) {
     super.onCreate(arguments)
     onlineSource = arguments?.getString("onlineSource")
     keepFixtures = arguments?.getString("keepFixtures") == "true"
+    previewUi = arguments?.getString("previewUi") == "true"
     start()
   }
   override fun onStart() {
     val result = Bundle()
     try {
+      if (previewUi) {
+        val context = targetContext
+        val preview = File(context.cacheDir, "clip-smoke/preview-ui-${System.nanoTime()}.mp4")
+        File(context.cacheDir, "clip-smoke/preview.mp4").copyTo(preview)
+        val intent = android.content.Intent(context, app.gyrolet.mpvrx.ui.player.PlayerActivity::class.java)
+          .setAction(android.content.Intent.ACTION_VIEW).setDataAndType(android.net.Uri.fromFile(preview), "video/mp4")
+          .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val activity = startActivitySync(intent) as app.gyrolet.mpvrx.ui.player.PlayerActivity
+        val deadline = android.os.SystemClock.elapsedRealtime() + 15_000
+        while (app.gyrolet.mpvrx.ui.player.PlaybackSession.state.value.phase != app.gyrolet.mpvrx.ui.player.PlaybackPhase.READY ||
+          app.gyrolet.mpvrx.ui.player.PlaybackSession.state.value.currentItem?.originalUri?.endsWith(preview.name) != true) {
+          check(android.os.SystemClock.elapsedRealtime() < deadline) { "Preview playback did not become ready" }
+          Thread.sleep(100)
+        }
+        Thread.sleep(700)
+        runOnMainSync {
+          app.gyrolet.mpvrx.ui.player.PlaybackSession.setPropertyBoolean("pause", true)
+          val overlay = app.gyrolet.mpvrx.ui.player.clip.ClipOverlayView.ensureAttached(activity)
+          check(overlay.openClip())
+          val model = androidx.lifecycle.ViewModelProvider(activity)[app.gyrolet.mpvrx.ui.player.PlayerViewModel::class.java]
+          model.panelShown.value = app.gyrolet.mpvrx.ui.player.Panels.Clip
+          model.hideControls()
+        }
+        uiAutomation.waitForIdle(500, 10_000)
+        Thread.sleep(500)
+        fun texts(node: android.view.accessibility.AccessibilityNodeInfo?): List<String> = if (node == null) emptyList() else listOfNotNull(node.text?.toString(), node.contentDescription?.toString()) + (0 until node.childCount).flatMap { texts(node.getChild(it)) }
+        uiAutomation.clearCache()
+        val labels = texts(uiAutomation.rootInActiveWindow)
+        val screenshot = uiAutomation.takeScreenshot()
+        val image = File(context.getExternalFilesDir(null), "download-popup-preview.png")
+        image.outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; screenshot.recycle()
+        check("Video" in labels && "Audio" in labels && "Download" in labels) { "${app.gyrolet.mpvrx.ui.player.PlaybackSession.state.value.phase}; panel=${androidx.lifecycle.ViewModelProvider(activity)[app.gyrolet.mpvrx.ui.player.PlayerViewModel::class.java].panelShown.value}; finishing=${activity.isFinishing}; destroyed=${activity.isDestroyed}: $labels" }
+        fun scrollables(node: android.view.accessibility.AccessibilityNodeInfo?): List<android.view.accessibility.AccessibilityNodeInfo> =
+          if (node == null) emptyList() else (if (node.isScrollable) listOf(node) else emptyList()) + (0 until node.childCount).flatMap { scrollables(node.getChild(it)) }
+        fun scrollPanel() {
+          val node = scrollables(uiAutomation.rootInActiveWindow).maxByOrNull {
+            val bounds = android.graphics.Rect(); it.getBoundsInScreen(bounds); bounds.height()
+          }
+          node?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+          Thread.sleep(350)
+        }
+        var videoLabels = texts(uiAutomation.rootInActiveWindow)
+        repeat(10) { if ("Video format ▾" !in videoLabels || "Save video" !in videoLabels) { scrollPanel(); uiAutomation.clearCache(); videoLabels = texts(uiAutomation.rootInActiveWindow) } }
+        check("Video format ▾" in videoLabels && "Crop" in videoLabels && "Save video" in videoLabels) { videoLabels.toString() }
+        val videoScreenshot = uiAutomation.takeScreenshot()
+        File(context.getExternalFilesDir(null), "download-video-preview.png").outputStream().use { videoScreenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; videoScreenshot.recycle()
+        runOnMainSync { check(app.gyrolet.mpvrx.ui.player.clip.ClipOverlayView.ensureAttached(activity).openClip(audioOnly = true)) }
+        uiAutomation.waitForIdle(500, 10_000)
+        Thread.sleep(1000)
+        repeat(3) { scrollPanel() }
+        uiAutomation.clearCache()
+        val audioLabels = texts(uiAutomation.rootInActiveWindow)
+        val audioScreenshot = uiAutomation.takeScreenshot()
+        File(context.getExternalFilesDir(null), "download-audio-preview.png").outputStream().use { audioScreenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; audioScreenshot.recycle()
+        check(listOf("M4A", "MP3", "WAV", "AAC", "Save audio").all { it in audioLabels } && "Crop" !in audioLabels) { audioLabels.toString() }
+        result.putString("result", "PASS: shared download popup tabs; screenshot=${image.path}")
+        finish(android.app.Activity.RESULT_OK, result); return
+      }
       runBlocking {
         val context = targetContext
         val directory = File(context.cacheDir, "clip-smoke").apply { mkdirs() }
@@ -141,15 +201,17 @@ class ClipSmokeInstrumentation : Instrumentation() {
           0.0, 1.0, emptyMap(), {}, {}, app.gyrolet.mpvrx.ui.player.clip.AudioExportFormat.WAV)
         check(delayedError == null) { "Delayed audio: $delayedError" }
         DownloadRenameSmoke.run(context, source, audioOutput)
+        DownloadExportSmoke.run(context, source, audioOutput)
         testConcurrentDirectDownloads(context, directory)
-        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; M4A/MP3/WAV/AAC exports, decoded trim checks, M4A 2 ms duration/start checks; audio shorter than video, 219.300 s trim at 44.1 kHz, and delayed-audio timeline regressions")
+        result.putString("result", "PASS: Android FFmpeg runtime, automatic export, millisecond non-keyframe start, first/last-frame content, exact 20-frame count and audio/video start alignment; stream-copy merge; overlapping direct downloads; M4A/MP3/WAV/AAC exports, decoded trim checks, M4A 2 ms duration/start checks; audio shorter than video, 219.300 s trim at 44.1 kHz, and delayed-audio timeline regressions; metadata/cover art, unchanged full-file and full-audio exports, concurrent exports, scaled cropping and live recording finalization")
         onlineSource?.let { url ->
           val onlineOutput = File(directory, "online.m4a")
           val onlineError = app.gyrolet.mpvrx.ui.player.clip.AudioClipExporter.export(context,
             url, url, onlineOutput.absolutePath, 10.7, 230.0, emptyMap(), {}, {})
           result.putString("online_result", if (onlineError == null) "PASS: supplied YouTube interval" else "NOT VERIFIED: $onlineError")
         }
-        if (!keepFixtures) directory.deleteRecursively()
+        if (keepFixtures) check(FfmpegRuntime.run(context, listOf("-y", "-stream_loop", "20", "-i", source.path, "-c", "copy", File(directory, "preview.mp4").path)).first == 0)
+        else directory.deleteRecursively()
       }
       finish(android.app.Activity.RESULT_OK, result)
     } catch (error: Throwable) {

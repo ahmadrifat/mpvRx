@@ -53,6 +53,7 @@ import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -131,6 +132,11 @@ class ClipOverlayView @JvmOverloads constructor(
 
   private var panelState by mutableStateOf(ClipPanelState())
 
+  private var recordingMode = false
+  private var options by mutableStateOf(DownloadExportOptions())
+  private var videoFormats by mutableStateOf<List<SourceVideoFormat>>(emptyList())
+  private var loadingFormats by mutableStateOf(false)
+  private var formatError by mutableStateOf<String?>(null)
   private var audioOnly = false
   private var audioFormat = AudioExportFormat.M4A
   private var draft: ClipDraft? = null
@@ -192,22 +198,111 @@ class ClipOverlayView @JvmOverloads constructor(
     if (cropView != null) true else super.onTouchEvent(event)
 
   fun openClip(audioOnly: Boolean = false): Boolean {
-    if (ClipExportManager.state.value !is ClipExportState.Exporting && (this.audioOnly != audioOnly || draft == null)) {
+    recordingMode = false
+    if (draft == null || draft?.itemId != PlaybackSession.state.value.currentItem?.stableId) {
       draft = null
       this.audioOnly = audioOnly
       audioFormat = AudioExportFormat.M4A
+      val item = PlaybackSession.state.value.currentItem
+      val rawExtension = android.net.Uri.parse(item?.originalUri.orEmpty()).lastPathSegment?.substringAfterLast('.', "").orEmpty().lowercase()
+      val titleExtension = item?.title?.substringAfterLast('.', "")?.lowercase()
+      val demuxer = PlaybackSession.getPropertyString("file-format").orEmpty()
+      val extension = listOfNotNull(rawExtension, titleExtension).firstOrNull { it in setOf("mp4", "mkv", "webm", "mov", "avi", "ts", "m4v") }
+        ?: when { demuxer.contains("matroska") -> "mkv"; demuxer.contains("mpegts") -> "ts"; demuxer.contains("avi") -> "avi"; else -> "mp4" }
+      val height = PlaybackSession.getPropertyInt("video-params/h") ?: 0
+      options = DownloadExportOptions(fileName = (item?.title ?: "Download").replace(Regex("\\.[A-Za-z0-9]{2,5}$"), ""), author = item?.artist ?: PlaybackSession.getPropertyString("metadata/by-key/artist").orEmpty(), thumbnail = item?.artworkUri, sourceExtension = extension)
+      videoFormats = listOf(SourceVideoFormat("${extension.uppercase()}${if (height > 0) " · ${height}p" else " · Source"}", null, extension))
+      formatError = null
     }
     if (audioOnly && !PlaybackSession.canExportAudio()) return false
+    this.audioOnly = audioOnly
     return beginClip()
+  }
+
+  fun openRecording(): Boolean {
+    recordingMode = true
+    val active = LiveRecording.state.value
+    options = if (active != null) DownloadExportOptions(fileName = active.name, directory = active.directory, sourceExtension = "mkv")
+      else DownloadExportOptions(fileName = PlaybackSession.state.value.currentItem?.title ?: "Recording", sourceExtension = "mkv")
+    return true
   }
 
   @Composable
   internal fun EditorPanel(onDismissRequest: () -> Unit) {
+    if (recordingMode) {
+      BackHandler(onBack = onDismissRequest)
+      val recording by LiveRecording.state.collectAsState()
+      var elapsed by remember { mutableStateOf(0L) }
+      LaunchedEffect(recording?.id) { while (recording != null) { elapsed = (System.currentTimeMillis() - recording!!.started) / 1000; kotlinx.coroutines.delay(1000) } }
+      DraggablePanel(header = {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+          AppIcon(if (recording == null) app.gyrolet.mpvrx.ui.icons.RecordIcons.Record else app.gyrolet.mpvrx.ui.icons.RecordIcons.Stop, null, modifier = Modifier.size(22.dp))
+          Text("Record stream", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 10.dp))
+          Spacer(Modifier.weight(1f))
+          IconButton(onClick = onDismissRequest) { AppIcon(Icons.RoundedFilled.Close, "Close", modifier = Modifier.size(24.dp)) }
+        }
+      }) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          DownloadSettingsFields(options, { options = it }, locked = recording != null, recording = true)
+          Text("File format: MKV")
+          if (recording != null) Text("Recording · ${elapsed / 60}:${(elapsed % 60).toString().padStart(2, '0')}")
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onDismissRequest, modifier = Modifier.weight(1f)) { Text("Close") }
+            Button(onClick = {
+              if (recording != null) { LiveRecording.stop(); onDismissRequest() }
+              else try {
+                val item = PlaybackSession.state.value.currentItem ?: return@Button
+                if (LiveRecording.start(context, item, options)) onDismissRequest()
+              } catch (error: Exception) { toast(error.message ?: "Could not start recording") }
+            }, enabled = recording?.stopping != true && options.fileName.isNotBlank(), modifier = Modifier.weight(1f)) { Text(if (recording == null) "Start recording" else "Stop recording") }
+          }
+        }
+      }
+      return
+    }
     if (panelState.cropActive) return
+    val item = PlaybackSession.state.value.currentItem
+    LaunchedEffect(item?.stableId) {
+      if (item != null && (item.originalUri.startsWith("http") || app.gyrolet.mpvrx.ui.player.ytdlp.YtdlpManager.requiresYtdlp(item.originalUri))) {
+        loadingFormats = true
+        try {
+          val info = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine>().inspectSource(item.originalUri, item.headers)
+          if (info.formats.isNotEmpty()) {
+            videoFormats = info.formats
+            options = options.copy(formatSelector = info.formats.first().selector, sourceExtension = info.formats.first().extension)
+          }
+          options = options.copy(author = options.author.ifBlank { info.author.orEmpty() }, thumbnail = options.thumbnail ?: info.thumbnail)
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (_: Exception) { formatError = "Source quality options are unavailable. You can save the current source." }
+        finally { loadingFormats = false }
+      }
+    }
 
     ClipEditorPanel(
       state = panelState,
       onFormatChange = { audioFormat = it; refreshDraftUi() },
+      settings = {
+        val hasVideo = (PlaybackSession.getPropertyInt("video-params/w") ?: 0) > 0
+        if (hasVideo && PlaybackSession.canExportAudio()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          listOf(false to "Video", true to "Audio").forEach { (audio, label) ->
+            FilledTonalButton(onClick = { audioOnly = audio; refreshDraftUi() }, colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = if (audioOnly == audio) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent), modifier = Modifier.weight(1f)) { Text(label) }
+          }
+        }
+        DownloadSettingsFields(options, { options = it })
+      },
+      videoFormatControl = {
+        var expanded by remember { mutableStateOf(false) }
+        Box(Modifier.weight(1f)) {
+          OutlinedButton(onClick = { expanded = true }, enabled = !loadingFormats, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            Text(if (loadingFormats) "Loading formats…" else "Video format ▾", maxLines = 1)
+          }
+          androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            videoFormats.forEach { format -> androidx.compose.material3.DropdownMenuItem(text = { Text(format.label) }, onClick = { options = options.copy(formatSelector = format.selector, sourceExtension = format.extension); expanded = false }) }
+          }
+        }
+      },
+      outputDescription = if (audioOnly) null else formatError ?: if (draft?.crop != null || (draft?.startSeconds ?: 0.0) > .001 || kotlin.math.abs((draft?.endSeconds ?: 0.0) - mediaDurationSeconds()) > .01) "${videoFormats.firstOrNull { it.selector == options.formatSelector }?.label ?: "Source"} → MP4 clip" else videoFormats.firstOrNull { it.selector == options.formatSelector }?.label,
+      saveEnabled = options.fileName.isNotBlank() && (audioOnly || !loadingFormats),
       onRangeChange = ::updateClipRange,
       onStartTimeChange = ::updateClipStart,
       onEndTimeChange = ::updateClipEnd,
@@ -232,10 +327,7 @@ class ClipOverlayView @JvmOverloads constructor(
       return false
     }
 
-    if (ClipExportManager.state.value is ClipExportState.Exporting) {
-      updateExportState()
-      return true
-    }
+
 
     ensureDraft() ?: return false
     refreshDraftUi()
@@ -247,13 +339,13 @@ class ClipOverlayView @JvmOverloads constructor(
     draft?.takeIf { it.itemId == itemId }?.let { return it }
 
     val duration = mediaDurationSeconds()
-    var start = if (audioOnly) 0.0 else (currentPosition() ?: 0.0).coerceAtLeast(0.0)
+    var start = 0.0
     val end =
       if (duration > MIN_CLIP_SECONDS) {
         if (start >= duration - MIN_CLIP_SECONDS) {
           start = (duration - DEFAULT_CLIP_SECONDS).coerceAtLeast(0.0)
         }
-        if (audioOnly) duration else (start + DEFAULT_CLIP_SECONDS).coerceAtMost(duration)
+        duration
       } else {
         start + DEFAULT_CLIP_SECONDS
       }
@@ -324,12 +416,7 @@ class ClipOverlayView @JvmOverloads constructor(
   private fun saveOrCancelExport() { saveClip() }
 
   private fun saveClip() {
-    val exportState = ClipExportManager.state.value
-    if (exportState is ClipExportState.Exporting) {
-      ClipExportManager.cancel()
-      updateExportState()
-      return
-    }
+
 
     val active = draft ?: return
     val end = active.endSeconds
@@ -344,6 +431,14 @@ class ClipOverlayView @JvmOverloads constructor(
       return
     }
 
+    val whole = active.startSeconds <= .001 && kotlin.math.abs(end - mediaDurationSeconds()) <= .01
+    val configured = options.copy(fullMedia = whole, directory = options.directory ?: if (!audioOnly) org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.AppDownloadManager>().locations.linksDir().path else null)
+    if (!audioOnly && active.crop == null && whole && item.originalUri.startsWith("http")) {
+      org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine>().enqueue(
+        item.originalUri, configured.fileName, java.io.File(configured.directory!!), formatSelector = configured.formatSelector,
+        posterUrl = configured.thumbnail, headers = item.headers, exportOptions = configured)
+      closeDraft(); dismissClipPanel(); toast("Downloading — see Downloads"); return
+    }
     val accepted =
       ClipExportManager.export(
         context,
@@ -354,21 +449,16 @@ class ClipOverlayView @JvmOverloads constructor(
           crop = if (audioOnly) null else active.crop,
           audioOnly = audioOnly,
           audioFormat = audioFormat,
+          options = configured,
         ),
       )
-    if (!accepted) toast(R.string.clip_export_busy)
-    updateExportState()
+    if (!accepted) toast(R.string.clip_invalid_range)
+    else { closeDraft(); dismissClipPanel(); toast("Saving — see Downloads") }
   }
 
   private fun cancelOrClose(): Boolean {
-    if (ClipExportManager.state.value is ClipExportState.Exporting) {
-      ClipExportManager.cancel()
-      updateExportState()
-      return false
-    } else {
-      closeDraft()
-      return true
-    }
+    closeDraft()
+    return true
   }
 
   private fun closeDraft() {
@@ -458,51 +548,10 @@ class ClipOverlayView @JvmOverloads constructor(
     refreshDraftUi()
   }
 
-  private fun updateExportState() {
-    when (val state = ClipExportManager.state.value) {
-      ClipExportState.Idle -> {
-        panelState =
-          panelState.copy(
-            exporting = false,
-            cancelling = false,
-            progress = 0,
-          )
-        lastTerminalState = null
-      }
-      is ClipExportState.Exporting -> {
-        panelState =
-          panelState.copy(
-            exporting = true,
-            cancelling = state.cancelling,
-            progress = (state.progress * 100f).roundToInt().coerceIn(0, 100),
-          )
-      }
-      is ClipExportState.Success -> {
-        if (lastTerminalState !== state) {
-          toast(context.getString(R.string.clip_saved, state.displayName))
-          lastTerminalState = state
-          draft = null
-          ClipEditorUiState.clear()
-          panelState = ClipPanelState(progress = 100)
-          dismissClipPanel()
-          ClipExportManager.consumeTerminalState()
-        }
-      }
-      is ClipExportState.Error -> {
-        if (lastTerminalState !== state) {
-          toast(if (audioOnly) "Audio export failed: ${state.message}" else context.getString(R.string.clip_export_failed, state.message))
-          lastTerminalState = state
-          ClipExportManager.consumeTerminalState()
-          panelState = panelState.copy(exporting = false, cancelling = false)
-          refreshDraftUi()
-        }
-      }
-    }
-  }
+  private fun updateExportState() { panelState = panelState.copy(exporting = false, cancelling = false) }
 
   private fun clearDraftIfMediaChanged() {
     val active = draft ?: return
-    if (ClipExportManager.state.value is ClipExportState.Exporting) return
     if (PlaybackSession.state.value.currentItem?.stableId == active.itemId) return
 
     draft = null
@@ -548,7 +597,7 @@ class ClipOverlayView @JvmOverloads constructor(
         crop = active.crop,
         canSave =
           active.endSeconds?.let { it > active.startSeconds + MIN_CLIP_SECONDS } == true &&
-            ClipExportManager.state.value !is ClipExportState.Exporting,
+            true,
       )
   }
 
@@ -636,6 +685,10 @@ class ClipOverlayView @JvmOverloads constructor(
 private fun ClipEditorPanel(
   state: ClipPanelState,
   onFormatChange: (AudioExportFormat) -> Unit,
+  settings: @Composable () -> Unit,
+  videoFormatControl: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+  outputDescription: String?,
+  saveEnabled: Boolean,
   onRangeChange: (Float, Float, Float) -> Unit,
   onStartTimeChange: (Float) -> Unit,
   onEndTimeChange: (Float) -> Unit,
@@ -660,13 +713,13 @@ private fun ClipEditorPanel(
             .padding(top = MaterialTheme.spacing.small),
       ) {
         AppIcon(
-          imageVector = if (state.audioOnly) Icons.RoundedFilled.AudioDownload else Icons.RoundedFilled.ContentCut,
+          imageVector = Icons.RoundedFilled.Download,
           contentDescription = null,
           tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.size(22.dp),
         )
         Text(
-          text = if (state.audioOnly) "Download audio" else stringResource(R.string.clip_action),
+          text = "Download",
           style = MaterialTheme.typography.titleLarge,
           modifier = Modifier.padding(start = 10.dp),
         )
@@ -684,6 +737,10 @@ private fun ClipEditorPanel(
     ClipEditorPanelContent(
       state = state,
       onFormatChange = onFormatChange,
+      settings = settings,
+      videoFormatControl = videoFormatControl,
+      outputDescription = outputDescription,
+      saveEnabled = saveEnabled,
       startTimeValid = startTimeValid,
       endTimeValid = endTimeValid,
       onStartTimeValidityChange = { startTimeValid = it },
@@ -704,6 +761,10 @@ private fun ClipEditorPanel(
 private fun ClipEditorPanelContent(
   state: ClipPanelState,
   onFormatChange: (AudioExportFormat) -> Unit,
+  settings: @Composable () -> Unit,
+  videoFormatControl: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+  outputDescription: String?,
+  saveEnabled: Boolean,
   startTimeValid: Boolean,
   endTimeValid: Boolean,
   onStartTimeValidityChange: (Boolean) -> Unit,
@@ -721,6 +782,7 @@ private fun ClipEditorPanelContent(
     modifier = Modifier.padding(MaterialTheme.spacing.medium),
     verticalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.medium),
   ) {
+    settings()
     val end = state.endSeconds
     val duration = state.durationSeconds
     val maxTime = duration.takeIf { it > MIN_CLIP_SECONDS.toFloat() } ?: Float.MAX_VALUE
@@ -833,14 +895,15 @@ private fun ClipEditorPanelContent(
         ) { Text(format.name, maxLines = 1) }
       }
     }
-    if (!state.audioOnly) OutlinedButton(
-      onClick = onCrop,
-      enabled = !state.exporting,
-      modifier = Modifier.fillMaxWidth().height(48.dp),
-    ) {
-      AppIcon(Icons.RoundedFilled.AspectRatio, contentDescription = null, modifier = Modifier.size(19.dp))
-      Spacer(Modifier.width(8.dp))
-      Text(stringResource(R.string.clip_crop))
+    if (!state.audioOnly) {
+      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        videoFormatControl()
+        OutlinedButton(onClick = onCrop, enabled = !state.exporting, modifier = Modifier.weight(1f).height(48.dp)) {
+          AppIcon(Icons.RoundedFilled.AspectRatio, contentDescription = null, modifier = Modifier.size(19.dp))
+          Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.clip_crop))
+        }
+      }
+      outputDescription?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 
     if (state.exporting) {
@@ -883,12 +946,12 @@ private fun ClipEditorPanelContent(
         }
         Button(
           onClick = onSave,
-          enabled = state.canSave && startTimeValid && endTimeValid,
+          enabled = state.canSave && startTimeValid && endTimeValid && saveEnabled,
           modifier = Modifier.weight(1.4f).height(48.dp),
         ) {
-          AppIcon(if (state.audioOnly) Icons.RoundedFilled.AudioDownload else Icons.RoundedFilled.ContentCut, contentDescription = null, modifier = Modifier.size(18.dp))
+          AppIcon(Icons.RoundedFilled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
           Spacer(Modifier.width(8.dp))
-          Text(if (state.audioOnly) "Save audio" else stringResource(R.string.clip_save), maxLines = 1)
+          Text(if (state.audioOnly) "Save audio" else "Save video", maxLines = 1)
         }
       }
     }

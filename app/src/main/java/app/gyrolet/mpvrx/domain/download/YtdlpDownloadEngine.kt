@@ -64,6 +64,7 @@ class YtdlpDownloadEngine(
     val artifactFiles: Set<String> = emptySet(),
     val headers: Map<String, String> = emptyMap(),
     val fileBaseName: String? = null,
+    val exportOptions: app.gyrolet.mpvrx.ui.player.clip.DownloadExportOptions? = null,
   ) {
     val isActive: Boolean get() = state == JobState.QUEUED || state == JobState.RUNNING
   }
@@ -104,6 +105,7 @@ class YtdlpDownloadEngine(
     mergeSeparateStreams: Boolean = false,
     posterUrl: String? = null,
     headers: Map<String, String> = emptyMap(),
+    exportOptions: app.gyrolet.mpvrx.ui.player.clip.DownloadExportOptions? = null,
   ): Int {
     val id = nextId.getAndIncrement()
     if (!directory.exists()) directory.mkdirs()
@@ -119,7 +121,8 @@ class YtdlpDownloadEngine(
           mergeSeparateStreams = mergeSeparateStreams,
           posterUrl = posterUrl,
           headers = headers,
-          fileBaseName = DownloadLocations.sanitizeName(title) + "-" + id,
+          fileBaseName = DownloadLocations.sanitizeName(exportOptions?.fileName?.takeIf(String::isNotBlank) ?: title).replace("%", "_") + "-" + id,
+          exportOptions = exportOptions,
         )
     }
     YtdlpDownloadService.start(context)
@@ -287,6 +290,8 @@ class YtdlpDownloadEngine(
         formatSelector = job.formatSelector,
         headers = job.headers,
       )
+    val actualCommand = command.toMutableList()
+    job.exportOptions?.let { options -> actualCommand.addAll(actualCommand.indexOf("--"), listOf("--merge-output-format", options.sourceExtension, "--remux-video", options.sourceExtension)) }
     val observedArtifacts = linkedSetOf<String>()
     val errorOutput = ArrayDeque<String>()
     var destination: String? = null
@@ -296,7 +301,7 @@ class YtdlpDownloadEngine(
       withContext(Dispatchers.IO) {
         runCatching {
           if (control.cancelRequested) return@runCatching -1
-          val process = startProcess(command)
+          val process = startProcess(actualCommand)
           control.process = process
           if (control.cancelRequested) process.destroyForcibly()
           BufferedReader(InputStreamReader(process.inputStream)).useLines { lines ->
@@ -362,19 +367,29 @@ class YtdlpDownloadEngine(
                 }
               }
             resolvedResult.onSuccess { resolved ->
-              val artifacts = sourceArtifacts + resolved.absolutePath
-              cleanupIntermediateArtifacts(job, artifacts, resolved)
+              job.exportOptions?.let { options ->
+                val artwork = app.gyrolet.mpvrx.ui.player.clip.ExportFiles.artwork(context, options, job.posterUrl)
+                app.gyrolet.mpvrx.ui.player.clip.ExportFiles.decorate(context, resolved, options.author, artwork)
+                artwork?.let { saved -> updateJob(id) { it.copy(posterUrl = saved) } }
+              }
+              val published = job.exportOptions?.fileName?.takeIf(String::isNotBlank)?.let { name ->
+                val target = app.gyrolet.mpvrx.ui.player.clip.ExportFiles.reserve(File(job.directory), app.gyrolet.mpvrx.ui.player.clip.ExportFiles.name(name, resolved.extension))
+                try { java.nio.file.Files.move(resolved.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING); target }
+                catch (error: Throwable) { target.delete(); throw error }
+              } ?: resolved
+              val artifacts = sourceArtifacts + published.absolutePath
+              cleanupIntermediateArtifacts(job, artifacts, published)
               cleanupWorkingDirectory(id)
               updateJob(id) {
                 it.copy(
                   state = JobState.SUCCESS,
                   progressPercent = 100f,
                   detail = "",
-                  outputFile = resolved.absolutePath,
+                  outputFile = published.absolutePath,
                   artifactFiles = it.artifactFiles + artifacts,
                 )
               }
-              AppDownloadManager.notifyCompletedMedia(context, resolved)
+              AppDownloadManager.notifyCompletedMedia(context, published)
             }.onFailure { error ->
               updateJob(id) {
                 it.copy(
@@ -494,11 +509,44 @@ class YtdlpDownloadEngine(
     return YtdlpManager.startPythonProcess(command, context)
   }
 
+  data class SourceInfo(val title: String?, val author: String?, val thumbnail: String?, val formats: List<app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat>)
+
+  @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+  suspend fun inspectSource(url: String, headers: Map<String, String>): SourceInfo = withContext(Dispatchers.IO) {
+    require(YtdlpManager.ensureRuntimeInstalled(context)) { "Could not prepare yt-dlp" }
+    val command = buildCommand(url, "source.%(ext)s", context.cacheDir.path, context.cacheDir.path, "bestvideo+bestaudio/best", headers).toMutableList()
+    command.addAll(command.indexOf("--"), listOf("--skip-download", "--dump-single-json", "--no-progress"))
+    val process = startProcess(command)
+    val cancellation = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { if (it != null) process.destroyForcibly() }
+    try {
+      var root: org.json.JSONObject? = null
+      process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line -> if (line.startsWith("{")) root = runCatching { org.json.JSONObject(line) }.getOrNull() } }
+      require(process.waitFor() == 0 && root != null) { "Could not retrieve source formats" }
+      val json = root!!
+      val array = json.optJSONArray("formats") ?: org.json.JSONArray()
+      val available = (0 until array.length()).map(array::getJSONObject)
+      val hasAudio = available.any { it.optString("acodec") !in listOf("none", "", "null") }
+      val choices = available.filter {
+        it.optString("vcodec") !in listOf("none", "", "null") && it.optInt("height") > 0 && !it.optBoolean("has_drm")
+      }.map { f ->
+        val ext = f.optString("ext", "mp4")
+        val id = f.getString("format_id")
+        val separate = f.optString("acodec") in listOf("none", "", "null")
+        val pairing = if (ext == "webm") "bestaudio[ext=webm]" else "bestaudio[ext=m4a]/bestaudio"
+        val selector = if (separate && hasAudio) "$id+($pairing)" else id
+        val fps = f.optDouble("fps", 0.0).toInt().takeIf { it > 0 }?.let { " · $it fps" }.orEmpty()
+        val codec = f.optString("vcodec").substringBefore('.').uppercase()
+        app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat("${ext.uppercase()} · ${f.optInt("height")}p$fps · $codec", selector, ext)
+      }.distinctBy { it.label }.reversed()
+      SourceInfo(json.optString("title").takeIf(String::isNotBlank), json.optString("artist", json.optString("uploader")).takeIf(String::isNotBlank), json.optString("thumbnail").takeIf { it.startsWith("http") }, choices)
+    } finally { cancellation?.dispose(); if (process.isAlive) process.destroyForcibly() }
+  }
+
   internal data class ClipStreams(val video: String, val audio: String?, val headers: Map<String, String>, val thumbnail: String? = null)
   @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
-  internal suspend fun resolveForClip(url: String, audioOnly: Boolean = false): ClipStreams = withContext(Dispatchers.IO) {
+  internal suspend fun resolveForClip(url: String, audioOnly: Boolean = false, formatSelector: String? = null): ClipStreams = withContext(Dispatchers.IO) {
     require(YtdlpManager.ensureRuntimeInstalled(context)) { "Could not prepare yt-dlp" }
-    val base = buildCommand(url, "source.%(ext)s", context.cacheDir.absolutePath, context.cacheDir.absolutePath, if (audioOnly) "bestaudio/best" else "bestvideo+bestaudio/best").toMutableList()
+    val base = buildCommand(url, "source.%(ext)s", context.cacheDir.absolutePath, context.cacheDir.absolutePath, formatSelector ?: if (audioOnly) "bestaudio/best" else "bestvideo+bestaudio/best").toMutableList()
     val separator = base.indexOf("--")
     base.addAll(separator, listOf("--skip-download", "--dump-single-json", "--no-progress"))
     val process = startProcess(base)
@@ -518,10 +566,10 @@ class YtdlpDownloadEngine(
   }
 
   @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
-  internal suspend fun acquireForClip(url: String, progress: (Double) -> Unit): File = withContext(Dispatchers.IO) {
+  internal suspend fun acquireForClip(url: String, formatSelector: String? = null, progress: (Double) -> Unit): File = withContext(Dispatchers.IO) {
     require(YtdlpManager.ensureRuntimeInstalled(context)) { "Could not prepare yt-dlp" }
     val directory = File(context.cacheDir, "clip-acquire-${java.util.UUID.randomUUID()}").apply { mkdirs() }
-    val command = buildCommand(url, "source.%(ext)s", directory.absolutePath, directory.absolutePath, "bestvideo+bestaudio/best")
+    val command = buildCommand(url, "source.%(ext)s", directory.absolutePath, directory.absolutePath, formatSelector ?: "bestvideo+bestaudio/best")
     val process = startProcess(command)
     val cancellation = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause -> if (cause != null) process.destroyForcibly() }
     var success = false

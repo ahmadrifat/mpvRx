@@ -131,15 +131,6 @@ fun RenderPlayerButton(
   buttonSize: Dp = 40.dp,
   compact: Boolean = false,
 ) {
-  if (button == PlayerButton.AUDIO_DOWNLOAD) {
-    val available = androidx.compose.runtime.produceState(initialValue = false) {
-      while (true) {
-        value = PlaybackSession.canExportAudio()
-        kotlinx.coroutines.delay(250)
-      }
-    }.value
-    if (!available) return
-  }
   PlayerButtonContentTheme {
     val controlColor =
       if (compact) androidx.compose.material3.LocalContentColor.current else defaultControlColor
@@ -783,7 +774,25 @@ fun RenderPlayerButton(
       )
     }
 
-    PlayerButton.DOWNLOAD -> DownloadCurrentButton()
+    PlayerButton.DOWNLOAD, PlayerButton.RECORD -> {
+      val live = androidx.compose.runtime.produceState(initialValue = PlaybackSession.isLiveForDownload()) {
+        while (true) { value = PlaybackSession.isLiveForDownload(); kotlinx.coroutines.delay(250) }
+      }.value
+      if ((button == PlayerButton.RECORD) == live) {
+        val clipOverlay = remember(activity) { ClipOverlayView.ensureAttached(activity) }
+        val recording by app.gyrolet.mpvrx.ui.player.clip.LiveRecording.state.collectAsState()
+        ControlsButton(
+          icon = if (live) { if (recording == null) app.gyrolet.mpvrx.ui.icons.RecordIcons.Record else app.gyrolet.mpvrx.ui.icons.RecordIcons.Stop } else Icons.RoundedFilled.Download,
+          onClick = {
+            val audio = (PlaybackSession.getPropertyInt("video-params/w") ?: 0) <= 0
+            if (if (live) clipOverlay.openRecording() else clipOverlay.openClip(audioOnly = audio)) onOpenPanel(Panels.Clip)
+          },
+          title = if (live) { if (recording == null) "Record stream" else "Stop recording" } else "Download",
+          color = if (hideBackground) controlColor else MaterialTheme.colorScheme.onSurface,
+          modifier = Modifier.size(buttonSize),
+        )
+      }
+    }
     PlayerButton.AUDIO_DOWNLOAD -> {
       val clipOverlay = remember(activity) { ClipOverlayView.ensureAttached(activity) }
       ControlsButton(

@@ -96,7 +96,7 @@ class AppearancePreferences(
   val topRightControls =
     preferenceStore.getString(
       "top_right_controls",
-      "CAST,CURRENT_CHAPTER,DECODER,AUDIO_TRACK,SUBTITLES,DOWNLOAD,AUDIO_DOWNLOAD,MORE_OPTIONS",
+      "CAST,CURRENT_CHAPTER,DECODER,AUDIO_TRACK,SUBTITLES,DOWNLOAD,RECORD,MORE_OPTIONS",
     )
 
   val bottomRightControls =
@@ -114,7 +114,7 @@ class AppearancePreferences(
   val portraitBottomControls =
     preferenceStore.getString(
       "portrait_bottom_controls",
-      "CAST,SCREEN_ROTATION,DECODER,AUDIO_TRACK,SUBTITLES,BOOKMARKS_CHAPTERS,PLAYBACK_SPEED,BACKGROUND_PLAYBACK,REPEAT_MODE,SHUFFLE,VIDEO_ZOOM,FRAME_NAVIGATION,CLIP,SCOPES,ASPECT_RATIO,PICTURE_IN_PICTURE,LOCK_CONTROLS,DOWNLOAD,AUDIO_DOWNLOAD,MORE_OPTIONS",
+      "CAST,SCREEN_ROTATION,DECODER,AUDIO_TRACK,SUBTITLES,BOOKMARKS_CHAPTERS,PLAYBACK_SPEED,BACKGROUND_PLAYBACK,REPEAT_MODE,SHUFFLE,VIDEO_ZOOM,FRAME_NAVIGATION,CLIP,SCOPES,ASPECT_RATIO,PICTURE_IN_PICTURE,LOCK_CONTROLS,DOWNLOAD,RECORD,MORE_OPTIONS",
     )
 
   private val castButtonMigrationComplete =
@@ -189,6 +189,22 @@ class AppearancePreferences(
         portraitBottomControls.set("${portraitBottomControls.get()},CLIP")
       }
       clipButtonMigrationComplete.set(true)
+    }
+    val unified = preferenceStore.getBoolean("unified_download_controls_v9", false)
+    if (!unified.get()) {
+      listOf(topLeftControls, topRightControls, bottomLeftControls, bottomRightControls, portraitBottomControls).forEach { preference ->
+        val old = preference.get().split(',').filter(String::isNotBlank)
+        val hasDownload = "DOWNLOAD" in old
+        val updated = old.mapNotNull { name ->
+          when (name) {
+            "CLIP", "AUDIO_DOWNLOAD" -> if (hasDownload) null else "DOWNLOAD"
+            else -> name
+          }
+        }.distinct().toMutableList()
+        if ("DOWNLOAD" in updated && "RECORD" !in updated) updated.add(updated.indexOf("DOWNLOAD") + 1, "RECORD")
+        preference.set(updated.joinToString(","))
+      }
+      unified.set(true)
     }
   }
 

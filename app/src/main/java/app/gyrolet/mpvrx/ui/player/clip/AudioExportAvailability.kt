@@ -10,7 +10,9 @@ internal object AudioExportAvailability {
     val route = XtreamPlaybackUri.parse(source)?.route
     if (route == XtreamPlaybackUri.Route.LIVE || route == XtreamPlaybackUri.Route.BARE_LIVE) return false
     val network = source.startsWith("http://") || source.startsWith("https://")
-    if (network && (seekable != true || runCatching { java.net.URI(source).path.orEmpty().contains("/live/") }.getOrDefault(false))) return false
+    val path = runCatching { java.net.URI(source).path.orEmpty().lowercase() }.getOrDefault("")
+    val finiteFile = path.substringAfterLast('.') in setOf("mp4", "mkv", "webm", "mov", "avi", "m4v", "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus")
+    if (network && ((seekable != true && manifestLive != false && !finiteFile) || path.contains("/live/"))) return false
     return true
   }
 }

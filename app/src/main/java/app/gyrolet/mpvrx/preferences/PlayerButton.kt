@@ -40,6 +40,7 @@ enum class PlayerButton(
   SUBTITLES(Icons.RoundedFilled.Subtitles),
   CLIP(Icons.RoundedFilled.ContentCut),
   DOWNLOAD(Icons.RoundedFilled.Download),
+  RECORD(app.gyrolet.mpvrx.ui.icons.RecordIcons.Record),
   AUDIO_DOWNLOAD(Icons.RoundedFilled.AudioDownload),
   MORE_OPTIONS(Icons.RoundedFilled.MoreVert),
   CURRENT_CHAPTER(Icons.RoundedFilled.Bookmarks), // <-- CHANGED ICON
@@ -64,7 +65,8 @@ enum class PlayerButton(
  */
 val allPlayerButtons =
   PlayerButton.values().filter {
-    it != PlayerButton.NONE &&
+    it != PlayerButton.CLIP && it != PlayerButton.AUDIO_DOWNLOAD &&
+      it != PlayerButton.NONE &&
       it != PlayerButton.BACK_ARROW &&
       it != PlayerButton.VIDEO_TITLE
   }
@@ -92,7 +94,8 @@ fun getPlayerButtonLabel(button: PlayerButton): String =
     PlayerButton.AUDIO_TRACK -> stringResource(R.string.btn_label_audio)
     PlayerButton.SUBTITLES -> stringResource(R.string.btn_label_subtitles)
     PlayerButton.CLIP -> stringResource(R.string.clip_action)
-    PlayerButton.DOWNLOAD -> "Download video"
+    PlayerButton.DOWNLOAD -> "Download"
+    PlayerButton.RECORD -> "Record stream"
     PlayerButton.AUDIO_DOWNLOAD -> "Download audio"
     PlayerButton.MORE_OPTIONS -> stringResource(R.string.btn_label_more)
     PlayerButton.CURRENT_CHAPTER -> stringResource(R.string.btn_label_chapter)

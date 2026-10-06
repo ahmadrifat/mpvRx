@@ -1232,6 +1232,13 @@ object PlaybackSession : MPVLib.EventObserver {
     withCore(Unit) { MPVLib.setPropertyFloat(property, value) }
   }
 
+  fun isLiveForDownload(): Boolean = withReadyCore(false) {
+    val item = state.value.currentItem ?: return@withReadyCore false
+    val source = item.originalUri
+    val network = source.startsWith("http") || source.startsWith("mpvrx-stalker:") || source.startsWith("rtsp:") || source.startsWith("rtmp:")
+    network && !canExportAudio()
+  }
+
   fun canExportAudio(): Boolean = withReadyCore(false) {
     val item = state.value.currentItem ?: return@withReadyCore false
     val registration = activeNetworkStream

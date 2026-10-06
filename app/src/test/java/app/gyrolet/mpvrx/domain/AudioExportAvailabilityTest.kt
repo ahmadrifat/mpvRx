@@ -20,4 +20,8 @@ class AudioExportAvailabilityTest {
   @Test fun unknownDurationDoesNotCreateAnInvalidFullLengthExport() {
     assertFalse(AudioExportAvailability.allowed("https://example.com/movie.mp4", null, true, null))
   }
+  @Test fun finiteFilesAndVodManifestsAreNotMistakenForLiveRecordings() {
+    assertTrue(AudioExportAvailability.allowed("https://example.com/movie.mp4", 120.0, false, null))
+    assertTrue(AudioExportAvailability.allowed("https://example.com/movie.m3u8", 120.0, false, false))
+  }
 }

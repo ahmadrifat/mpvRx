@@ -48,3 +48,26 @@ catalog URLs at playback, and retains account-scoped session cookies.
 The opt-in StalkerLiveTest takes MPVRX_TEST_MAG_PORTAL, MPVRX_TEST_MAG_MAC and
 MPVRX_TEST_MAG_CHANNEL from the test process environment; never commit real
 provider credentials or temporary stream URLs to fixtures or release notes.
+
+## Unified downloads and live recordings: 2.7.2.9
+
+VersionCode 100 upgrades the signed 2.7.2.8 build (code 90). Finite media uses
+one Download control with Video/Audio tabs, source format/resolution choices,
+full-range defaults and the existing precision/crop editor. Audio offers M4A,
+MP3, WAV and AAC. Compatible whole audio can retain its original encoding;
+other compressed exports use 192 kbps. Filename, optional artist, artwork and
+per-job local destination choices persist with job history. Local whole video
+copies preserve the source bytes. Settings do not migrate existing files.
+
+Live media uses a theme-tinted Record control. Recording owns a connection and
+portal registration independently of playback, writes Matroska with stream
+copy, and exposes Stop in the popup, Downloads and its notification. Its
+filename, format and destination are locked while recording. Failed/interrupted
+recordings never automatically resume; any recoverable saved portion remains
+available in the selected local folder. Cloud destinations are excluded.
+
+Video edits retain the current Media3/FFmpeg precision pipeline and its MP4
+output. Source quality selection is input selection, not a promise to retain
+the source codec after precision/crop processing. The popup displays this.
+Clips/audio exports support cancellation and retry; their processing does not
+support pause/resume. Ordinary yt-dlp downloads retain pause/resume support.

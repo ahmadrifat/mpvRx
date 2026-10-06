@@ -117,6 +117,11 @@ class DownloadLocations(
     return dir
   }
 
+  fun localFolder(treeUri: Uri): String? {
+    if (treeUri.authority != "com.android.externalstorage.documents") return null
+    return resolveTreeUriToPath(treeUri)?.takeIf { File(it).isDirectory && File(it).canWrite() }
+  }
+
   private fun resolveTreeUriToPath(treeUri: Uri): String? =
     runCatching {
       val docId = DocumentsContract.getTreeDocumentId(treeUri)

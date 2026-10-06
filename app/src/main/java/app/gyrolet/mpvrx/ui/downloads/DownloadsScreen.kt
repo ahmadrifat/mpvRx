@@ -153,6 +153,7 @@ object DownloadsScreen : Screen {
 
     app.gyrolet.mpvrx.ui.player.clip.ClipJobs.initialize(context)
     val clips by app.gyrolet.mpvrx.ui.player.clip.ClipJobs.jobs.collectAsState()
+    val liveRecording by app.gyrolet.mpvrx.ui.player.clip.LiveRecording.state.collectAsState()
     val activeTorrents = torrents.filterNot { it.complete }
     val completedTorrents = torrents.filter { it.complete }
     val activeClips = clips.filter { it.status != "Completed" }
@@ -216,10 +217,13 @@ object DownloadsScreen : Screen {
             }
           }
           items(activeClips, key = { "clip_${it.id}" }) { clip ->
-            DownloadMediaRow(title = clip.title, subtitle = clip.error ?: clip.status, posterUrl = clip.posterUrl, isError = clip.status == "Failed", progress = clip.progress, indeterminate = clip.active && clip.progress == null) {
-              if (clip.active) IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipExportManager.cancel() }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Cancel") }
+            DownloadMediaRow(title = clip.title, subtitle = clip.error ?: if (clip.recording && clip.active) liveRecording?.let { state ->
+              val elapsed = (System.currentTimeMillis() - state.started) / 1000
+              "${clip.status} · ${elapsed / 60}:${(elapsed % 60).toString().padStart(2, '0')} · ${android.text.format.Formatter.formatFileSize(context, state.bytes)}"
+            } ?: clip.status else clip.status, posterUrl = clip.posterUrl, isError = clip.status == "Failed", progress = clip.progress, indeterminate = clip.active && clip.progress == null) {
+              if (clip.active) IconButton(onClick = { if (clip.recording) app.gyrolet.mpvrx.ui.player.clip.LiveRecording.stop() else app.gyrolet.mpvrx.ui.player.clip.ClipExportManager.cancel(clip.id) }) { Icon(if (clip.recording) app.gyrolet.mpvrx.ui.icons.RecordIcons.Stop else Icons.RoundedFilled.Close, contentDescription = if (clip.recording) "Stop recording" else "Cancel") }
               else {
-                IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.retry(context, clip) }) { Icon(Icons.RoundedFilled.Refresh, contentDescription = "Retry") }
+                if (!clip.recording) IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.retry(context, clip) }) { Icon(Icons.RoundedFilled.Refresh, contentDescription = "Retry") }
                 IconButton(onClick = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) }) { Icon(Icons.RoundedFilled.Close, contentDescription = "Remove") }
               }
             }
@@ -253,7 +257,7 @@ object DownloadsScreen : Screen {
               onRename = { requestRename(torrent.path) { name -> offline.rename(context, torrent, name) } }, onPlay = { MediaUtils.playFile(source = torrent.path, context = context, launchSource = "downloads", title = torrent.title) }, onDelete = { pendingTorrentDelete = torrent })
           }
           items(completedClips, key = { "clip_done_${it.id}" }) { clip ->
-            CompletedRow(title = clip.title, subtitle = "${if (clip.audioOnly) "${clip.audioFormat.name} audio" else "Clipped"} · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = clip.posterUrl, mediaPath = clip.output, playable = clip.output != null,
+            CompletedRow(title = clip.title, subtitle = "${if (clip.audioOnly) "${clip.audioFormat.name} audio" else if (clip.recording) "Recorded video" else if (clip.options.fullMedia) "Saved video" else "Clipped"} · ${"%.3f".format(clip.start)}–${"%.3f".format(clip.end)} s", posterUrl = clip.posterUrl, mediaPath = clip.output, playable = clip.output != null,
               onRename = { requestRename(clip.output) { name -> app.gyrolet.mpvrx.ui.player.clip.ClipJobs.rename(context, clip, name) } }, onPlay = { clip.output?.let { MediaUtils.playFile(source = it, context = context, launchSource = "downloads", title = clip.title, isAudio = clip.audioOnly) } }, onDelete = { app.gyrolet.mpvrx.ui.player.clip.ClipJobs.remove(context, clip) })
           }
           items(completedYtdlp, key = { "ytdlp_done_${it.id}" }) { job ->

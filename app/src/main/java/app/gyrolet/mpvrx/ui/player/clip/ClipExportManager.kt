@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -53,6 +54,7 @@ data class ClipRequest(
   val crop: ClipCrop? = null,
   val audioOnly: Boolean = false,
   val audioFormat: AudioExportFormat = AudioExportFormat.M4A,
+  val options: DownloadExportOptions = DownloadExportOptions(),
 )
 
 sealed interface ClipExportState {
@@ -81,7 +83,7 @@ sealed interface ClipExportState {
  */
 object ClipExportManager {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-  private val exporting = AtomicBoolean(false)
+  private val running = java.util.concurrent.ConcurrentHashMap<String, Job>()
   private val streamSequence = AtomicLong(0L)
   private val _state = MutableStateFlow<ClipExportState>(ClipExportState.Idle)
 
@@ -95,7 +97,7 @@ object ClipExportManager {
     request: ClipRequest,
   ): Boolean {
     if (request.endSeconds <= request.startSeconds + MIN_CLIP_SECONDS) return false
-    if (!exporting.compareAndSet(false, true)) return false
+
 
     // Capture the displayed/oriented frame size while this request still refers to the actively
     // playing item. CropSelectionView reports coordinates in this same orientation.
@@ -119,25 +121,58 @@ object ClipExportManager {
       var resolvedSource: ResolvedSource? = null
       var temporaryOutput: File? = null
       try {
-        resolvedSource = resolveSource(appContext, request.item)
-        temporaryOutput = createTemporaryOutput(appContext, request.audioOnly, request.audioFormat)
+        resolvedSource = resolveSource(appContext, request.item, request.options.formatSelector != null)
+        val extension = if (request.audioOnly) request.audioFormat.extension else if (request.options.fullMedia && request.crop == null) request.options.sourceExtension else "mp4"
+        temporaryOutput = File.createTempFile("mpvrx-export-", ".$extension", appContext.cacheDir).apply { delete() }
+        val artwork = ExportFiles.artwork(appContext, request.options, request.item.artworkUri)
+        artwork?.let { ClipJobs.update(clipJobId, posterUrl = it) }
 
         val error = if (request.audioOnly) AudioClipExporter.export(
-          format = request.audioFormat,
+          format = request.audioFormat, fullMedia = request.options.fullMedia,
           context = appContext, source = resolvedSource.uri, original = request.item.originalUri,
           output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
           headers = request.item.headers,
-          onThumbnail = { ClipJobs.update(clipJobId, posterUrl = it) },
+          onThumbnail = { if (artwork == null) ClipJobs.update(clipJobId, posterUrl = it) },
           onProgress = { progress ->
             _state.value = ClipExportState.Exporting(progress.toFloat())
             ClipJobs.update(clipJobId, progress = progress.toFloat())
           }, onStage = { stage -> ClipJobs.update(clipJobId, status = stage) },
-        ) else AutomaticClipExporter.export(
+        ) else if (request.options.fullMedia && request.crop == null) {
+          val input = resolvedSource.uri
+          if (!input.startsWith("http") && !input.startsWith("edl://")) {
+            val stream = if (input.startsWith("content://")) appContext.contentResolver.openInputStream(Uri.parse(input))
+              else File(Uri.parse(input).path ?: input).inputStream()
+            stream?.use { source -> temporaryOutput.outputStream().use { target ->
+              val buffer = ByteArray(64 * 1024); var bytes = 0L
+              val length = if (input.startsWith("content://")) -1L else File(Uri.parse(input).path ?: input).length()
+              while (true) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val count = source.read(buffer); if (count < 0) break
+                target.write(buffer, 0, count); bytes += count
+                if (length > 0) ClipJobs.update(clipJobId, progress = (bytes.toFloat() / length).coerceAtMost(.99f))
+              }
+            } } ?: error("Could not read the source file")
+            null
+          } else {
+            ClipJobs.update(clipJobId, status = "Downloading")
+            val result = FfmpegRuntime.run(appContext, buildList {
+              addAll(listOf("-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"))
+              if (request.item.headers.isNotEmpty()) addAll(listOf("-headers", request.item.headers.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
+              addAll(listOf("-i", input, "-map", "0:v:0?", "-map", "0:a?", "-c", "copy", temporaryOutput.path))
+            }) { line ->
+              if (line.startsWith("out_time_us=")) line.substringAfter('=').toDoubleOrNull()?.let {
+                ClipJobs.update(clipJobId, progress = (it / (request.endSeconds * 1_000_000)).toFloat().coerceIn(0f, .99f))
+              }
+            }
+            if (result.first == 0) null else "Could not save the current source"
+          }
+        } else AutomaticClipExporter.export(
           context = appContext, source = resolvedSource.uri, original = request.item.originalUri,
           output = temporaryOutput.absolutePath, start = request.startSeconds, end = request.endSeconds,
+          formatSelector = request.options.formatSelector,
           crop = request.crop, frameWidth = cropFrameSize?.first ?: 0, frameHeight = cropFrameSize?.second ?: 0,
           headers = request.item.headers,
-          onThumbnail = { ClipJobs.update(clipJobId, posterUrl = it) },
+          onThumbnail = { if (artwork == null) ClipJobs.update(clipJobId, posterUrl = it) },
           onProgress = { progress ->
             _state.value = ClipExportState.Exporting(progress.toFloat())
             ClipJobs.update(clipJobId, progress = progress.toFloat())
@@ -154,9 +189,21 @@ object ClipExportManager {
           error("Export finished without producing a media file")
         }
 
-        val displayName = buildDisplayName(request.item, request.audioOnly, request.audioFormat)
+        val finalArtwork = artwork ?: ExportFiles.artwork(appContext, request.options, ClipJobs.jobs.value.firstOrNull { it.id == clipJobId }?.posterUrl)
+        finalArtwork?.let { ClipJobs.update(clipJobId, posterUrl = it) }
+        ExportFiles.decorate(appContext, temporaryOutput, request.options.author, finalArtwork)
+        val displayName = request.options.fileName.takeIf(String::isNotBlank)?.let { ExportFiles.name(it, extension) }
+          ?: buildDisplayName(request.item, request.audioOnly, request.audioFormat)
         ClipJobs.update(clipJobId, status = "Saving")
-        val savedUri = saveToMediaLibrary(appContext, temporaryOutput, displayName, request.audioOnly, request.audioFormat)
+        val savedUri = request.options.directory?.let { path ->
+          val target = ExportFiles.reserve(File(path), displayName)
+          try {
+            temporaryOutput.copyTo(target, overwrite = true)
+            temporaryOutput.delete()
+            app.gyrolet.mpvrx.domain.download.AppDownloadManager.notifyCompletedMedia(appContext, target)
+            Uri.fromFile(target)
+          } catch (failure: Throwable) { target.delete(); throw failure }
+        } ?: saveToMediaLibrary(appContext, temporaryOutput, displayName, request.audioOnly, request.audioFormat)
         temporaryOutput = null
         ClipJobs.update(clipJobId, status = "Completed", progress = 1f, output = savedUri.toString())
         _state.value = ClipExportState.Success(savedUri, displayName)
@@ -175,10 +222,12 @@ object ClipExportManager {
       }
     }
     activeJob = job
+    running[clipJobId] = job
     job.invokeOnCompletion { error ->
+      running.remove(clipJobId)
       if (activeJob === job) {
         activeJob = null
-        exporting.set(false)
+
         if (error is CancellationException && _state.value is ClipExportState.Exporting) {
           _state.value = ClipExportState.Idle
         }
@@ -189,11 +238,14 @@ object ClipExportManager {
     return true
   }
 
-  fun cancel() {
+  fun cancel(id: String? = null) {
+    if (id != null) { running[id]?.cancel(); return }
     val current = _state.value as? ClipExportState.Exporting ?: return
     _state.value = current.copy(cancelling = true)
     activeJob?.cancel()
   }
+
+  fun cancelAll() { running.values.forEach { it.cancel() } }
 
   fun consumeTerminalState() {
     if (_state.value is ClipExportState.Success || _state.value is ClipExportState.Error) {
@@ -209,13 +261,15 @@ object ClipExportManager {
   private fun resolveSource(
     context: Context,
     item: PlaybackItem,
+    selectedQuality: Boolean = false,
   ): ResolvedSource {
+    ExportSource.portal(item)?.let { return ResolvedSource(it.uri, it.close) }
     app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.initialize(context)
     app.gyrolet.mpvrx.domain.torrent.OfflineTorrents.find(item.originalUri, item.torrentFileIndex)?.takeIf { it.complete }?.let { return ResolvedSource(it.path) }
     val direct = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.AppDownloadManager>().downloads.value.firstOrNull { it.entity.sourceUrl == item.originalUri && it.isPlayable }
-    if (direct != null) return ResolvedSource(direct.file.absolutePath)
+    if (direct != null && !selectedQuality) return ResolvedSource(direct.file.absolutePath)
     val completed = org.koin.core.context.GlobalContext.get().get<app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine>().jobs.value.firstOrNull { it.url == item.originalUri && it.state == app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine.JobState.SUCCESS && it.outputFile?.let(::File)?.isFile == true }
-    if (completed != null) return ResolvedSource(completed.outputFile!!)
+    if (completed != null && !selectedQuality) return ResolvedSource(completed.outputFile!!)
     val contentUri =
       when {
         item.originalUri.startsWith("content://", ignoreCase = true) -> item.originalUri

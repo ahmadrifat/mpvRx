@@ -98,6 +98,7 @@
         </receiver>
 
         <service android:name=".domain.torrent.TorrentDownloadService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name=".ui.player.clip.RecordingService" android:exported="false" android:foregroundServiceType="dataSync" />
         <service android:name=".ui.player.clip.ClipExportService" android:exported="false" android:foregroundServiceType="dataSync" />
         <activity
             android:name=".MainActivity"
