@@ -183,6 +183,12 @@ object NetworkStreamingScreen : Screen {
     var ytdlpInstallError by remember { mutableStateOf<String?>(null) }
     var ytdlpInstallJob by remember { mutableStateOf<Job?>(null) }
     var linkPlaybackJob by remember { mutableStateOf<Job?>(null) }
+    val downloadEngine = koinInject<app.gyrolet.mpvrx.domain.download.YtdlpDownloadEngine>()
+    var preparingDownloads by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var preparedDownload by remember { mutableStateOf<app.gyrolet.mpvrx.ui.player.clip.PreparedNetworkDownload?>(null) }
+    preparedDownload?.let { prepared ->
+      app.gyrolet.mpvrx.ui.player.clip.NetworkDownloadDialog(prepared) { preparedDownload = null }
+    }
 
     fun proceedToPlay(url: String) {
       if (linkPlaybackJob?.isActive == true) return
@@ -480,6 +486,7 @@ object NetworkStreamingScreen : Screen {
                   showYtdlpInstallPrompt ||
                     showYtdlpInstallProgress ||
                     linkPlaybackJob?.isActive == true,
+                preparingDownloads = preparingDownloads,
                 onPlayLink = { url ->
                   val playableSource = normalizeTorrentSource(url) ?: url.trim()
                   if (isTorrentSource(playableSource)) {
@@ -504,8 +511,20 @@ object NetworkStreamingScreen : Screen {
                     showTorrentPicker = true
                     torrentPickerViewModel.open(TorrentSelectionInput(source = playableSource, title = entry.fileName))
                   } else {
-                    MediaUtils.playFile(source = playableSource, context = context, launchSource = "network_download", title = entry.fileName, openDownloadEditor = true)
-
+                    if (preparingDownloads.isEmpty()) {
+                      preparingDownloads = preparingDownloads + entry.stableKey
+                      coroutineScope.launch {
+                        try {
+                          val item = app.gyrolet.mpvrx.ui.player.PlaybackItem.fromUri(playableSource, title = entry.fileName, artworkUri = entry.posterUrl)
+                          preparedDownload = app.gyrolet.mpvrx.ui.player.clip.NetworkDownloadPreparation.prepare(context, item, downloadEngine)
+                        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                          android.widget.Toast.makeText(context, "Media information took too long to load. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (_: Exception) {
+                          android.widget.Toast.makeText(context, "Could not load media information. Check the link and connection.", android.widget.Toast.LENGTH_SHORT).show()
+                        } finally { preparingDownloads = preparingDownloads - entry.stableKey }
+                      }
+                    }
                   }
                 },
                 onDeleteRecent = viewModel::deleteStreamEntry,
@@ -755,6 +774,7 @@ private fun LocalNetworkContent(
   connectionStatuses: Map<Long, ConnectionStatus>,
   recentLinks: List<NetworkStreamEntryEntity>,
   isPreparingLink: Boolean,
+  preparingDownloads: Set<String>,
   onPlayLink: (String) -> Unit,
   onPlayRecent: (NetworkStreamEntryEntity) -> Unit,
   onSaveToMedia: (NetworkStreamEntryEntity) -> Unit,
@@ -779,6 +799,7 @@ private fun LocalNetworkContent(
       StreamLinkSection(
         recentLinks = recentLinks,
         isPreparing = isPreparingLink,
+        preparingDownloads = preparingDownloads,
         onPlayLink = onPlayLink,
         onPlayRecent = onPlayRecent,
         onSaveToTorrent = onSaveToMedia,
@@ -1043,6 +1064,7 @@ private fun EmptyStateCard(
 private fun StreamLinkSection(
   recentLinks: List<NetworkStreamEntryEntity>,
   isPreparing: Boolean,
+  preparingDownloads: Set<String>,
   onPlayLink: (String) -> Unit,
   onPlayRecent: (NetworkStreamEntryEntity) -> Unit,
   onSaveToTorrent: (NetworkStreamEntryEntity) -> Unit,
@@ -1260,9 +1282,11 @@ private fun StreamLinkSection(
               }
               IconButton(
                 onClick = { onSaveToTorrent(entry) },
+                enabled = preparingDownloads.isEmpty(),
                 modifier = Modifier.size(32.dp),
               ) {
-                Icon(
+                if (entry.stableKey in preparingDownloads) CircularProgressIndicator(modifier = Modifier.size(18.dp).semantics { contentDescription = "Loading media information" }, strokeWidth = 2.dp)
+                else Icon(
                   imageVector = Icons.RoundedFilled.Download,
                   contentDescription = stringResource(R.string.downloads_download),
                   tint = MaterialTheme.colorScheme.secondary,

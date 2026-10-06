@@ -48,10 +48,18 @@ object DownloadRenameSmoke {
       put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "rename-smoke.m4a")
       put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "audio/mp4")
       put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Music/mpvRx")
+      put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
     }
     val uri = context.contentResolver.insert(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)!!
     try {
       context.contentResolver.openOutputStream(uri)!!.use { audio.inputStream().use { input -> input.copyTo(it) } }
+      context.contentResolver.update(uri, android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+      // Finish indexing the fixture before testing a rename. Otherwise the write-triggered
+      // scanner can race the rename and restore the fixture's previous display name.
+      val indexed = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val path = context.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)!!.use { it.moveToFirst(); it.getString(0) }
+      android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null) { _, _ -> indexed.complete(Unit) }
+      withTimeout(10_000) { indexed.await() }
       val jobId = ClipJobs.add(context, ClipRequest(PlaybackItem.fromUri(source.path), 0.0, 1.0, audioOnly = true))
       ClipJobs.update(jobId, status = "Completed", output = uri.toString())
       ClipJobs.rename(context, ClipJobs.jobs.value.first { it.id == jobId }, audioName)

@@ -38,18 +38,21 @@ object LiveRecording {
         var input = portal?.uri ?: item.playableUri.ifBlank { item.originalUri }
         var audio: String? = null
         var headers = item.headers
-        if (YtdlpManager.requiresYtdlp(item.originalUri)) {
+        if (YtdlpManager.requiresYtdlp(item.originalUri) && !StreamExportAvailability.isStream(item.originalUri, item.playableUri, mime = item.mimeType)) {
           val streams = GlobalContext.get().get<YtdlpDownloadEngine>().resolveForClip(item.originalUri)
           input = streams.video; audio = streams.audio; headers = streams.headers + headers
         }
-        require(listOf("http://", "https://", "rtsp://", "rtmp://").any(input::startsWith)) { "This live source cannot be recorded" }
+        require(listOf("http://", "https://", "rtsp://", "rtmp://", "rtmps://", "udp://", "srt://").any(input::startsWith)) { "This live source cannot be recorded" }
         if (stopRequested) { file.delete(); ClipJobs.update(id, status = "Cancelled"); return@launch }
         val args = buildList {
           addAll(listOf("-hide_banner", "-y", "-progress", "pipe:1", "-nostats"))
           fun source(url: String) {
             addAll(listOf("-rw_timeout", "15000000", "-fflags", "+genpts"))
             if (url.startsWith("http") && headers.isNotEmpty()) addAll(listOf("-headers", headers.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
-            if (url.substringBefore('?').endsWith(".m3u8", true)) addAll(listOf("-live_start_index", "-1"))
+            if (FfmpegRuntime.isHls(url, item.mimeType)) {
+              addAll(FfmpegRuntime.remoteHlsOptions)
+              addAll(listOf("-live_start_index", "-1"))
+            }
             addAll(listOf("-i", url))
           }
           source(input); audio?.let(::source)

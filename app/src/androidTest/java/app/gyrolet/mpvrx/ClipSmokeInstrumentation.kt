@@ -13,6 +13,8 @@ class ClipSmokeInstrumentation : Instrumentation() {
   private var keepFixtures = false
   private var previewUi = false
   private var recordUi = false
+  private var networkUi = false
+  private var metadataOnly = false
   private var previewServer: fi.iki.elonen.NanoHTTPD? = null
   override fun onCreate(arguments: Bundle?) {
     super.onCreate(arguments)
@@ -20,11 +22,17 @@ class ClipSmokeInstrumentation : Instrumentation() {
     keepFixtures = arguments?.getString("keepFixtures") == "true"
     previewUi = arguments?.getString("previewUi") == "true"
     recordUi = arguments?.getString("recordUi") == "true"
+    networkUi = arguments?.getString("networkUi") == "true"
+    metadataOnly = arguments?.getString("metadataOnly") == "true"
     start()
   }
   override fun onStart() {
     val result = Bundle()
     try {
+      if (networkUi) {
+        result.putString("result", NetworkDownloadSmoke.run(this, metadataOnly))
+        finish(android.app.Activity.RESULT_OK, result); return
+      }
       if (previewUi || recordUi) {
         val context = targetContext
         val preview = File(context.cacheDir, "clip-smoke/preview-ui-${System.nanoTime()}.mp4")

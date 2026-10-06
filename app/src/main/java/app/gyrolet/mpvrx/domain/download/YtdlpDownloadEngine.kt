@@ -509,7 +509,7 @@ class YtdlpDownloadEngine(
     return YtdlpManager.startPythonProcess(command, context)
   }
 
-  data class SourceInfo(val title: String?, val author: String?, val thumbnail: String?, val formats: List<app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat>)
+  data class SourceInfo(val title: String?, val author: String?, val thumbnail: String?, val formats: List<app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat>, val duration: Double? = null, val live: Boolean? = null, val width: Int = 0, val height: Int = 0)
 
   @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
   suspend fun inspectSource(url: String, headers: Map<String, String>): SourceInfo = withContext(Dispatchers.IO) {
@@ -538,7 +538,8 @@ class YtdlpDownloadEngine(
         val codec = f.optString("vcodec").substringBefore('.').uppercase()
         app.gyrolet.mpvrx.ui.player.clip.SourceVideoFormat("${ext.uppercase()} · ${f.optInt("height")}p$fps · $codec", selector, ext)
       }.distinctBy { it.label }.reversed()
-      SourceInfo(json.optString("title").takeIf(String::isNotBlank), app.gyrolet.mpvrx.ui.player.clip.ExportFiles.author(*listOf("artist", "uploader", "channel", "creator").map { json.optString(it) }.toTypedArray()).takeIf(String::isNotBlank), json.optString("thumbnail").takeIf { it.startsWith("http") }, choices)
+      val live = when { json.optBoolean("is_live") || json.optString("live_status") == "is_live" -> true; json.optString("live_status") in listOf("not_live", "was_live", "post_live") || json.has("is_live") -> false; else -> null }
+      SourceInfo(json.optString("title").takeIf(String::isNotBlank), app.gyrolet.mpvrx.ui.player.clip.ExportFiles.author(*listOf("artist", "uploader", "channel", "creator").map { json.optString(it) }.toTypedArray()).takeIf(String::isNotBlank), json.optString("thumbnail").takeIf { it.startsWith("http") }, choices, json.optDouble("duration").takeIf { it.isFinite() && it > 0 }, live, json.optInt("width"), json.optInt("height"))
     } finally { cancellation?.dispose(); if (process.isAlive) process.destroyForcibly() }
   }
 

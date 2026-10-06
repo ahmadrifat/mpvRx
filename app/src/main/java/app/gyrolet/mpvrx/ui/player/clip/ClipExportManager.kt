@@ -103,8 +103,9 @@ object ClipExportManager {
     // playing item. CropSelectionView reports coordinates in this same orientation.
     val cropFrameSize =
       request.crop?.let { crop ->
-        val sourceWidth = PlaybackSession.getPropertyInt("video-params/w") ?: 0
-        val sourceHeight = PlaybackSession.getPropertyInt("video-params/h") ?: 0
+        val sameItem = PlaybackSession.state.value.currentItem?.stableId == request.item.stableId
+        val sourceWidth = if (sameItem) PlaybackSession.getPropertyInt("video-params/w") ?: request.item.videoWidth else request.item.videoWidth
+        val sourceHeight = if (sameItem) PlaybackSession.getPropertyInt("video-params/h") ?: request.item.videoHeight else request.item.videoHeight
         val rotation = ((crop.rotation % 360) + 360) % 360
         if (rotation == 90 || rotation == 270) {
           sourceHeight to sourceWidth

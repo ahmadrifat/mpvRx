@@ -11,6 +11,11 @@ import java.util.zip.ZipFile
 
 /** Executables stay in nativeLibraryDir, as required by Android's executable-file policy. */
 object FfmpegRuntime {
+  // HLS providers may use extensionless segments. Restrict nested URLs to remote protocols.
+  internal val remoteHlsOptions = listOf("-allowed_extensions", "ALL", "-extension_picky", "0", "-protocol_whitelist", "http,https,tcp,tls,crypto,data")
+  internal fun isHls(source: String, mime: String? = null): Boolean =
+    mime.orEmpty().contains("mpegurl", true) || source.substringBefore('?').endsWith(".m3u8", true) ||
+      Regex("(?:[?&])(?:format|extension)=(?:hls|m3u8)(?:&|$)", RegexOption.IGNORE_CASE).containsMatchIn(source)
   @Synchronized fun libraries(context: Context): File {
     val archive = File(context.applicationInfo.nativeLibraryDir, "libffmpeg.zip.so")
     require(archive.isFile) { "The FFmpeg runtime is missing for this device" }

@@ -50,6 +50,7 @@ internal object AutomaticClipExporter {
       val args = buildList {
         addAll(listOf("-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"))
         fun input(url: String) {
+          if (FfmpegRuntime.isHls(url)) addAll(FfmpegRuntime.remoteHlsOptions)
           if (requestHeaders.isNotEmpty() && url.startsWith("http")) addAll(listOf("-headers", requestHeaders.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
           addAll(listOf("-ss", "%.6f".format(java.util.Locale.US, start), "-i", url))
         }

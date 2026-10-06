@@ -45,6 +45,7 @@ internal object AudioClipExporter {
       val duration = "%.6f".format(Locale.US, end - start)
       val original = if (fullMedia && start == 0.0) FfmpegRuntime.run(context, buildList {
         addAll(listOf("-v", "error"))
+        if (FfmpegRuntime.isHls(input)) addAll(FfmpegRuntime.remoteHlsOptions)
         if (input.startsWith("http") && requestHeaders.isNotEmpty()) addAll(listOf("-headers", requestHeaders.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
         addAll(listOf("-select_streams", "a:0", "-show_entries", "stream=codec_name,profile,start_time,duration", "-of", "json", input))
       }, probe = true) else null
@@ -60,6 +61,7 @@ internal object AudioClipExporter {
           addAll(listOf("-headers", requestHeaders.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
         }
         if (!copyAudio) addAll(listOf("-ss", "%.6f".format(Locale.US, start)))
+        if (FfmpegRuntime.isHls(input)) addAll(FfmpegRuntime.remoteHlsOptions)
         addAll(listOf("-i", input))
         if (!copyAudio) addAll(listOf("-t", duration))
         addAll(listOf("-map", "0:a:0", "-vn", "-sn", "-dn"))

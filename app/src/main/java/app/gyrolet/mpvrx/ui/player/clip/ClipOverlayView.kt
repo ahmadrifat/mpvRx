@@ -102,7 +102,7 @@ import kotlin.math.roundToLong
 
 private const val MIN_CLIP_SECONDS = 0.05
 
-private data class ClipPanelState(
+internal data class ClipPanelState(
   val audioOnly: Boolean = false,
   val audioFormat: AudioExportFormat = AudioExportFormat.M4A,
   val clipDuration: String? = null,
@@ -692,7 +692,7 @@ class ClipOverlayView @JvmOverloads constructor(
 }
 
 @Composable
-private fun ClipEditorPanel(
+internal fun ClipEditorPanel(
   state: ClipPanelState,
   scrollState: androidx.compose.foundation.ScrollState,
   tabs: @Composable () -> Unit,
@@ -1159,7 +1159,7 @@ private fun ClipCropControls(
   }
 }
 
-private class CropSelectionView(
+internal class CropSelectionView(
   context: Context,
   private val sourceWidth: Int,
   private val sourceHeight: Int,

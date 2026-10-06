@@ -1234,9 +1234,15 @@ object PlaybackSession : MPVLib.EventObserver {
 
   fun isLiveForDownload(): Boolean = withReadyCore(false) {
     val item = state.value.currentItem ?: return@withReadyCore false
-    val source = item.originalUri
-    val network = source.startsWith("http") || source.startsWith("mpvrx-stalker:") || source.startsWith("rtsp:") || source.startsWith("rtmp:")
-    network && (activeNetworkStream?.hlsProxy != null || app.gyrolet.mpvrx.ui.player.clip.StreamExportAvailability.isStream(source, item.playableUri, MPVLib.getPropertyString("file-format")) || !canExportAudio())
+    // Recording describes the transport, independently of the growing DVR/cache duration.
+    activeNetworkStream?.hlsProxy != null ||
+      app.gyrolet.mpvrx.ui.player.clip.StreamExportAvailability.isStream(
+        item.originalUri, item.playableUri,
+        listOfNotNull(MPVLib.getPropertyString("file-format"), MPVLib.getPropertyString("demuxer-lavf-format")).joinToString(","), item.mimeType,
+      ) || app.gyrolet.mpvrx.ui.player.clip.StreamExportAvailability.isStream(
+        item.originalUri, MPVLib.getPropertyString("stream-path") ?: item.playableUri,
+        MPVLib.getPropertyString("file-format"), item.mimeType,
+      )
   }
 
   fun canExportAudio(): Boolean = withReadyCore(false) {
